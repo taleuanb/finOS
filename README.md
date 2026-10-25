@@ -95,6 +95,10 @@ curl -X POST https://<votre-app>.vercel.app/api/sync -H "Authorization: Bearer $
 
 En cas d'échec partiel d'une source, les autres actifs sont mis à jour et l'instantané est écrit avec `partial: true` ; le rapport liste les erreurs.
 
+## Performance
+
+Chaque base Notion (actifs, mouvements, dettes, budget, stratégie, plan, historique) a son propre cache de 15 minutes, invalidé par sa clé : une écriture dans l'app ne vide que la base qu'elle touche. La synchro quotidienne invalide actifs, mouvements et historique puis **préchauffe** le tableau de bord, si bien que la première visite de la journée trouve des caches pleins. Les lectures ne demandent à Notion que les colonnes utiles (les colonnes calculées par Notion sont ignorées : quantités et prix de revient viennent des mouvements) et l'historique est borné aux 800 derniers jours. Pour mesurer : chaque lecture réelle de Notion écrit une ligne `[perf] assets 312ms` (durées seulement, jamais de montant) dans les logs Vercel (*Logs* du projet, filtre `[perf]`), et `/api/sync` renvoie un en-tête `Server-Timing`.
+
 ## Tests
 
 ```bash

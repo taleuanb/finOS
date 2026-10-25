@@ -18,7 +18,7 @@ export interface Asset {
   id: string; name: string; assetClass: AssetClass; subtype?: string; institution?: string;
   currency: Currency; mode: 'auto' | 'manual'; quoteId?: string;
   manualValue?: number; manualValueDate?: string;         // devise de l'actif, ISO yyyy-mm-dd
-  quantity: number; costBasis: number;                     // rollups ; métaux : grammes fins
+  quantity: number; costBasis: number;                     // issus des mouvements (withPositions), 0 à la lecture ; métaux : grammes fins
   unitPrice?: number; value?: number; valueEur?: number;   // (script)
   fixedMonthly?: number; archived: boolean; syncStatus?: string; lastUpdate?: string;
 }

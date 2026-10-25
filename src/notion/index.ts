@@ -6,6 +6,8 @@ import { DB } from './schema';
 
 // Un seul FakeRepo par processus : en dev, les écritures persistent d'une requête à l'autre.
 let fake: FakeRepo | undefined;
+// Un seul Repo Notion par jeu de variables : sa mémoire du schéma des bases (filter_properties) survit entre les requêtes.
+let notion: { signature: string; repo: Repo } | undefined;
 
 /** Vrai si l'app tourne sur les données de démonstration : pas de NOTION_TOKEN et WOS_DEMO=1. */
 export function isDemo(): boolean {
@@ -32,5 +34,7 @@ export function getRepo(): Repo {
     throw new Error(`Variables d'environnement Notion manquantes : ${missing.join(', ')}`);
   }
   const ids = Object.fromEntries(names.map(([k, v]) => [k, process.env[v]!])) as Record<keyof typeof DB, string>;
-  return createNotionRepo(createNotionClient(token), ids, withRateLimit);
+  const signature = JSON.stringify([token, ids]);
+  if (notion?.signature !== signature) notion = { signature, repo: createNotionRepo(createNotionClient(token), ids, withRateLimit) };
+  return notion.repo;
 }

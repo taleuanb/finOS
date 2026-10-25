@@ -1,8 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const revalidateTag = vi.fn();
+const order: string[] = [];
+const revalidateNotion = vi.fn((...a: unknown[]) => { order.push(`revalidate:${a.join(',')}`); });
+const getDashboard = vi.fn(async () => { order.push('warm'); });
 const runSync = vi.fn();
-vi.mock('next/cache', () => ({ revalidateTag: (...a: unknown[]) => revalidateTag(...a) }));
+// `after` (Next 15.5) exécute le rappel une fois la réponse envoyée : ici on le met de côté pour le lancer à la main.
+const afterTasks: (() => Promise<void> | void)[] = [];
+vi.mock('next/server', async (orig) => ({
+  ...(await orig<typeof import('next/server')>()),
+  after: (task: () => Promise<void> | void) => { afterTasks.push(task); },
+}));
+vi.mock('@/lib/cacheTags', () => ({ revalidateNotion: (...a: unknown[]) => revalidateNotion(...a) }));
+vi.mock('@/lib/load', () => ({ getDashboard: () => getDashboard() }));
 vi.mock('@/sync/run', () => ({ runSync: (...a: unknown[]) => runSync(...a) }));
 vi.mock('@/notion', () => ({ getRepo: () => ({ fake: true }) }));
 vi.mock('@/prices/yahoo', () => ({ createYahooProvider: () => ({ yahoo: true }) }));
@@ -14,8 +23,13 @@ import { GET, POST, dynamic, maxDuration } from './route';
 const report = { date: '2026-10-27', updated: 18, errors: [{ assetId: 'hsbc', message: 'x' }], partial: true };
 
 beforeEach(() => {
-  revalidateTag.mockReset();
+  order.length = 0;
+  afterTasks.length = 0;
+  revalidateNotion.mockClear();
+  getDashboard.mockReset();
+  getDashboard.mockImplementation(async () => { order.push('warm'); });
   runSync.mockReset();
+  vi.spyOn(console, 'error').mockImplementation(() => {});
 });
 
 describe('/api/sync', () => {
@@ -35,7 +49,52 @@ describe('/api/sync', () => {
     expect(runSync).toHaveBeenCalledWith(expect.objectContaining({
       repo: { fake: true }, yahoo: { yahoo: true }, crypto: { crypto: true }, fx: { fx: true }, now: expect.any(Date),
     }));
-    expect(revalidateTag).toHaveBeenCalledWith('notion');
+    expect(revalidateNotion).toHaveBeenCalledWith('assets', 'movements', 'history');
+    expect(revalidateNotion).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalide actifs, mouvements et historique avant de répondre ; le préchauffage est différé après la réponse", async () => {
+    runSync.mockResolvedValue(report);
+    await GET();
+    expect(order).toEqual(['revalidate:assets,movements,history']);
+    expect(getDashboard).not.toHaveBeenCalled();
+    expect(afterTasks).toHaveLength(1);
+    await afterTasks[0]();
+    expect(order).toEqual(['revalidate:assets,movements,history', 'warm']);
+  });
+
+  it('répond même si le préchauffage ne se termine jamais (il ne retient pas la réponse)', async () => {
+    runSync.mockResolvedValue(report);
+    getDashboard.mockImplementation(() => new Promise(() => {}));
+    const res = await GET();
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual(report);
+    void afterTasks[0]();
+    expect(getDashboard).toHaveBeenCalledTimes(1);
+  });
+
+  it('ajoute un en-tête Server-Timing pour la synchro', async () => {
+    runSync.mockResolvedValue(report);
+    const res = await GET();
+    expect(res.headers.get('Server-Timing')).toMatch(/^sync;dur=\d+$/);
+  });
+
+  it('une erreur de préchauffage est journalisée sans lever', async () => {
+    runSync.mockResolvedValue(report);
+    getDashboard.mockRejectedValue(new Error('Notion lent'));
+    const res = await GET();
+    expect(res.status).toBe(200);
+    await expect(afterTasks[0]()).resolves.toBeUndefined();
+    expect(console.error).toHaveBeenCalled();
+  });
+
+  it("si la synchro lève après avoir écrit, invalide quand même les caches, répond 500 et ne préchauffe pas", async () => {
+    runSync.mockRejectedValue(new Error('Notion indisponible'));
+    const res = await GET();
+    expect(res.status).toBe(500);
+    expect(revalidateNotion).toHaveBeenCalledWith('assets', 'movements', 'history');
+    expect(afterTasks).toHaveLength(0);
+    expect(getDashboard).not.toHaveBeenCalled();
   });
 
   it('500 si runSync lui-même lève', async () => {

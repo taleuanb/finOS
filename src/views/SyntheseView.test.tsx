@@ -80,6 +80,8 @@ describe('SyntheseView', () => {
     renderView(withVariations);
     const card = screen.getByLabelText('Patrimoine net');
     expect(card).toHaveTextContent('30,00 %'); // Tout par défaut
+    expect(card).toHaveTextContent('sur la période disponible'); // l'historique lu est borné à 800 jours
+    expect(card).not.toHaveTextContent('depuis le début');
     await userEvent.click(screen.getByRole('button', { name: '1A' }));
     expect(card).toHaveTextContent('8,10 %');
     expect(card).not.toHaveTextContent('30,00 %');

@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AllocationLine } from '@/domain/types';
 import { FakeRepo, fixtureSeed } from '@/notion/fakeRepo';
 
-const revalidateTag = vi.fn();
-vi.mock('next/cache', () => ({ revalidateTag: (...a: unknown[]) => revalidateTag(...a) }));
+const revalidateNotion = vi.fn();
+vi.mock('@/lib/cacheTags', () => ({ revalidateNotion: (...a: unknown[]) => revalidateNotion(...a) }));
 
 let repo: FakeRepo;
 vi.mock('@/notion', () => ({ getRepo: () => repo }));
@@ -16,7 +16,7 @@ const lines: AllocationLine[] = [
 ];
 
 beforeEach(() => {
-  revalidateTag.mockClear();
+  revalidateNotion.mockClear();
   repo = new FakeRepo({ ...fixtureSeed, plan: [] });
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-11-05T10:00:00Z'));
@@ -24,17 +24,17 @@ beforeEach(() => {
 afterEach(() => vi.useRealTimers());
 
 describe('validatePlan (action)', () => {
-  it('écrit le plan et invalide le cache Notion', async () => {
+  it('écrit le plan et invalide les caches mouvements et plan', async () => {
     expect(await validatePlan('2026-11', lines)).toEqual({ ok: true });
     expect(await repo.listPlan()).toHaveLength(2);
-    expect(revalidateTag).toHaveBeenCalledWith('notion');
+    expect(revalidateNotion).toHaveBeenCalledWith('movements', 'plan');
   });
 
   it('la seconde validation du même mois échoue sans invalider le cache', async () => {
     await validatePlan('2026-11', lines);
-    revalidateTag.mockClear();
+    revalidateNotion.mockClear();
     expect(await validatePlan('2026-11', lines)).toEqual({ ok: false, error: 'Plan déjà validé pour 2026-11' });
-    expect(revalidateTag).not.toHaveBeenCalled();
+    expect(revalidateNotion).not.toHaveBeenCalled();
   });
 });
 
@@ -45,11 +45,11 @@ describe('declarePurchase (action)', () => {
     expect((await repo.listMovements()).slice(before)).toEqual([
       expect.objectContaining({ assetId: 'syla', planMonth: '2026-11', label: 'Plan 2026-11', amount: 600 }),
     ]);
-    expect(revalidateTag).toHaveBeenCalledWith('notion');
+    expect(revalidateNotion).toHaveBeenCalledWith('movements', 'plan');
   });
 
   it("n'invalide pas le cache en cas de refus", async () => {
     expect((await declarePurchase('syla', '2026-11', 0, '2026-11-05')).ok).toBe(false);
-    expect(revalidateTag).not.toHaveBeenCalled();
+    expect(revalidateNotion).not.toHaveBeenCalled();
   });
 });

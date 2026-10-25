@@ -1,10 +1,10 @@
-import { revalidateTag } from 'next/cache';
 import type { BudgetLine, Currency } from '@/domain/types';
 import type { Repo } from '@/notion/repo';
 
 /**
  * Logique des actions du budget, indépendante du dépôt réel (testée avec un FakeRepo).
  * Elle vit hors de `actions.ts` : un fichier 'use server' expose chacun de ses exports comme point d'entrée appelable.
+ * L'invalidation du cache (`revalidateNotion('budget')`) est faite par `actions.ts`, seulement en cas de succès.
  */
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
@@ -51,7 +51,6 @@ export async function saveBudgetLineWith(repo: Repo, input: unknown): Promise<Sa
     // L'id vient du client : il doit désigner une ligne de la base Budget, jamais une autre page Notion.
     if (parsed.line.id && !(await isBudgetLine(repo, parsed.line.id))) return { ok: false, error: NOT_FOUND };
     const id = await repo.upsertBudgetLine(parsed.line);
-    revalidateTag('notion');
     return { ok: true, id };
   } catch (e) {
     console.error('saveBudgetLine', e);
@@ -64,7 +63,6 @@ export async function deleteBudgetLineWith(repo: Repo, id: unknown): Promise<Act
   try {
     if (!(await isBudgetLine(repo, id))) return { ok: false, error: NOT_FOUND };
     await repo.deleteBudgetLine(id);
-    revalidateTag('notion');
     return { ok: true };
   } catch (e) {
     console.error('deleteBudgetLine', e);
@@ -84,7 +82,6 @@ export async function reorderBudgetWith(repo: Repo, ids: unknown): Promise<Actio
       seen.add(id);
       if (line.order !== order) await repo.upsertBudgetLine({ ...line, order });
     }
-    revalidateTag('notion');
     return { ok: true };
   } catch (e) {
     console.error('reorderBudget', e);

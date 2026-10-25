@@ -20,6 +20,8 @@ export const P = {
   movements: {
     label: 'Libellé', date: 'Date', asset: 'Actif', kind: 'Type', nature: 'Nature', quantity: 'Quantité',
     amount: 'Montant', spotEurPerKg: 'Cours spot jour J', premium: 'Prime %', planMonth: 'Mois du plan',
+    // Formules (T10) : alimentent les rollups Quantité / Prix de revient de la base Actifs.
+    signedQuantity: 'Quantité signée', signedAmount: 'Montant signé',
   },
   // 4.3 Dettes (titre : name)
   debts: {

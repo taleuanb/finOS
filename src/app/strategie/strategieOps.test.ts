@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Asset } from '@/domain/types';
+import type { Asset, StrategyEntryInput } from '@/domain/types';
+import { gridIssue } from '@/domain/zones';
 import { FakeRepo, fixtureSeed } from '@/notion/fakeRepo';
 import { saveMetalGridWith, saveMonthlyInvestWith, saveSpecialAssetsWith, saveTargetWith } from './strategieOps';
 
@@ -141,6 +142,20 @@ describe('saveTargetWith', () => {
     noWrite();
   });
 
+  it('refuse un actif principal qui n’est ni null ni une chaîne, sans rien effacer', async () => {
+    expect(await saveTargetWith(repo, 'Crypto', 10, 42 as never)).toEqual({ ok: false, error: 'Actif principal invalide pour cette classe' });
+    expect(await saveTargetWith(repo, 'Crypto', null, {} as never)).toEqual({ ok: false, error: 'Actif principal invalide pour cette classe' });
+    noWrite();
+    expect((await repo.getStrategy()).mainAssetByClass.Crypto).toBe('crypto');
+  });
+
+  it('la somme ne compte que les classes pilotables (une cible cachée sur Épargne est ignorée)', async () => {
+    await repo.setStrategyEntry({ key: 'cible:Épargne', value: 30 });
+    setEntry.mockClear();
+    // pilotables : 45+20+10+8+5 = 88 ; Fonds & ETF 45 -> 57 = 100 malgré les 30 % cachés
+    expect(await saveTargetWith(repo, 'Fonds & ETF', 57, 'hsbc')).toEqual({ ok: true });
+  });
+
   it('erreur Notion : générique', async () => {
     setEntry.mockRejectedValueOnce(new Error('boom'));
     expect(await saveTargetWith(repo, 'Crypto', 10, 'crypto')).toEqual({ ok: false, error: GENERIC });
@@ -188,6 +203,19 @@ describe('saveSpecialAssetsWith', () => {
     useRepo(withArchived('ag'));
     expect(await saveSpecialAssetsWith(repo, { silverAssetId: 'ag' })).toEqual({ ok: false, error: 'Actif argent invalide' });
     noWrite();
+  });
+
+  it('refuse le même actif pour l’or et l’argent', async () => {
+    const msg = 'L’or et l’argent doivent être deux actifs différents';
+    expect(await saveSpecialAssetsWith(repo, { goldAssetId: 'or', silverAssetId: 'or' })).toEqual({ ok: false, error: msg });
+    // un seul champ modifié : comparé à la valeur enregistrée de l'autre
+    expect(await saveSpecialAssetsWith(repo, { goldAssetId: 'ag' })).toEqual({ ok: false, error: msg });
+    expect(await saveSpecialAssetsWith(repo, { silverAssetId: 'or' })).toEqual({ ok: false, error: msg });
+    noWrite();
+  });
+
+  it('permet d’échanger l’or et l’argent en une seule sauvegarde', async () => {
+    expect(await saveSpecialAssetsWith(repo, { goldAssetId: 'ag', silverAssetId: 'or' })).toEqual({ ok: true });
   });
 
   it('refuse un objet vide', async () => {
@@ -282,5 +310,29 @@ describe('saveMetalGridWith', () => {
   it('erreur Notion : générique', async () => {
     setEntry.mockRejectedValueOnce(new Error('boom'));
     expect(await saveMetalGridWith(repo, GRID)).toEqual({ ok: false, error: GENERIC });
+  });
+
+  it('écrit toutes les zones avant de supprimer les anciennes', async () => {
+    await saveMetalGridWith(repo, GRID);
+    const lastWrite = Math.max(...setEntry.mock.invocationCallOrder);
+    const firstDelete = Math.min(...deleteEntry.mock.invocationCallOrder);
+    expect(deleteEntry).toHaveBeenCalled();
+    expect(lastWrite).toBeLessThan(firstDelete);
+  });
+
+  it.each([1, 2, 3])('si l’écriture n°%i échoue, la Stratégie reste lisible (grille intacte ou signalée)', async (n) => {
+    let calls = 0;
+    const real = FakeRepo.prototype.setStrategyEntry.bind(repo);
+    setEntry.mockImplementation(async (e: StrategyEntryInput) => {
+      calls += 1;
+      if (calls === n) throw new Error('boom');
+      return real(e);
+    });
+    expect(await saveMetalGridWith(repo, GRID)).toEqual({ ok: false, error: GENERIC });
+    const s = await repo.getStrategy();
+    expect(s.metalGrid.length).toBeGreaterThan(0);
+    // échec dès la 1re écriture : ancienne grille intacte ; ensuite : zones mêlées, détectées par gridIssue
+    if (n === 1) expect(gridIssue(s.metalGrid)).toBeNull();
+    else expect(gridIssue(s.metalGrid)).not.toBeNull();
   });
 });

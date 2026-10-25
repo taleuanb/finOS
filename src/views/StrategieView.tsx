@@ -6,7 +6,7 @@ import { useCallback, useId, useState, type FormEvent, type ReactNode } from 're
 import type { Asset, AssetClass } from '@/domain/types';
 import type { Dashboard } from '@/lib/dashboard';
 import { useDisplay } from '@/ui/display';
-import { PILOTABLE_CLASSES, type ActionResult, type MetalGridZoneInput } from '@/app/strategie/strategieOps';
+import { GENERIC_ERROR, PILOTABLE_CLASSES, type ActionResult, type MetalGridZoneInput } from '@/app/strategie/strategieOps';
 
 export interface StrategieActions {
   saveMonthlyInvest: (amount: number) => Promise<ActionResult>;
@@ -16,7 +16,6 @@ export interface StrategieActions {
 }
 
 const FIELD = 'min-h-11 w-full rounded-xl border border-border bg-background px-3 text-[15px] text-foreground';
-const GENERIC_ERROR = "L'enregistrement a échoué. Réessaie dans un instant.";
 const METALS: AssetClass = 'Métaux précieux';
 const MAX_ZONES = 8;
 
@@ -62,8 +61,8 @@ function useSection() {
   return { feedback, saving, reset, run };
 }
 
-function Section({ title, hint, section, onSave, children }: {
-  title: string; hint?: string; section: ReturnType<typeof useSection>; onSave: () => void; children: ReactNode;
+function Section({ title, hint, section, onSave, errorId, children }: {
+  title: string; hint?: string; section: ReturnType<typeof useSection>; onSave: () => void; errorId?: string; children: ReactNode;
 }) {
   const id = useId();
   const { feedback, saving } = section;
@@ -79,7 +78,7 @@ function Section({ title, hint, section, onSave, children }: {
           {hint ? <p className="text-[13px] text-muted">{hint}</p> : null}
         </div>
         {children}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <button
             type="submit"
             disabled={saving}
@@ -87,13 +86,12 @@ function Section({ title, hint, section, onSave, children }: {
           >
             Enregistrer
           </button>
-          <p
-            role="status"
-            aria-live="polite"
-            className={`text-[13px] font-semibold ${feedback.kind === 'error' ? 'text-loss' : 'text-gain'}`}
-          >
-            {feedback.kind === 'idle' ? '' : feedback.text}
+          <p role="status" aria-live="polite" className="text-[13px] font-semibold text-gain">
+            {feedback.kind === 'saved' ? feedback.text : ''}
           </p>
+          {feedback.kind === 'error' ? (
+            <p id={errorId} role="alert" className="text-[13px] font-semibold text-loss">{feedback.text}</p>
+          ) : null}
         </div>
       </form>
     </section>
@@ -118,12 +116,15 @@ function MonthlyInvest({ data, actions }: { data: Dashboard; actions: StrategieA
   const section = useSection();
   const [text, setText] = useState(() => toField(data.strategy.monthlyInvest));
   const id = useId();
+  const errorId = `${id}-error`;
+  const invalid = section.feedback.kind === 'error';
 
   return (
     <Section
       title="Investissement mensuel"
       hint="Montant que le plan répartit chaque mois entre tes cibles."
       section={section}
+      errorId={errorId}
       onSave={() => section.run(async () => {
         const amount = parseNumber(text);
         if (amount === null) return { ok: false, error: 'Montant invalide' };
@@ -136,6 +137,8 @@ function MonthlyInvest({ data, actions }: { data: Dashboard; actions: StrategieA
         <div className="flex items-center gap-2">
           <input
             id={id}
+            aria-invalid={invalid || undefined}
+            aria-describedby={invalid ? errorId : undefined}
             type={hidden ? 'password' : 'text'}
             inputMode="decimal"
             autoComplete="off"
@@ -185,6 +188,9 @@ function Targets({ data, actions }: { data: Dashboard; actions: StrategieActions
   const parsed = PILOTABLE_CLASSES.map((cls) => ({ cls, text: rows[cls].percent.trim(), value: parseNumber(rows[cls].percent) }));
   const total = round2(parsed.reduce((s, p) => s + (p.value ?? 0), 0));
   const gap = round2(100 - total);
+  const ignored = Object.entries(strategy.targets)
+    .filter(([cls, t]) => t !== undefined && !PILOTABLE_CLASSES.includes(cls as AssetClass))
+    .map(([cls, t]) => `${cls} ${toField((t ?? 0) * 100)} %`);
 
   async function save(): Promise<Outcome> {
     const changes: { cls: AssetClass; percent: number | null; main: string | null; delta: number }[] = [];
@@ -208,6 +214,8 @@ function Targets({ data, actions }: { data: Dashboard; actions: StrategieActions
       const res = await actions.saveTarget(c.cls, c.percent, c.main);
       if (!res.ok) return { ok: false, error: res.error };
       setBase((b) => ({ ...b, [c.cls]: { percent: c.percent, main: c.percent === null ? null : c.main } }));
+      // Cible supprimée : l'actif principal part avec elle (sinon il resterait saisi sans pourcentage).
+      if (c.percent === null) setRows((r) => ({ ...r, [c.cls]: { ...r[c.cls], main: '' } }));
     }
     return { ok: true };
   }
@@ -264,6 +272,11 @@ function Targets({ data, actions }: { data: Dashboard; actions: StrategieActions
         ) : null}
         {gap < 0 ? (
           <p role="status" className="text-[13px] font-semibold text-loss">{`Le total dépasse 100 % de ${toField(-gap)} %`}</p>
+        ) : null}
+        {ignored.length > 0 ? (
+          <p className="text-xs text-muted">
+            {`${ignored.length > 1 ? 'Cibles ignorées' : 'Cible ignorée'} dans Notion : ${ignored.join(', ')}`}
+          </p>
         ) : null}
       </div>
     </Section>

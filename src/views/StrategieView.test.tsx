@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event';
 import type { Dashboard } from '@/lib/dashboard';
 import { fixtureDashboard } from '@/lib/fixtures';
+import { GENERIC_ERROR } from '@/app/strategie/strategieOps';
 import { DisplayProvider } from '@/ui/display';
 
 const refresh = vi.fn();
@@ -114,10 +115,30 @@ describe('StrategieView — investissement mensuel', () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
+  it('l’erreur est annoncée (role=alert) et liée au champ (aria-invalid, aria-describedby)', async () => {
+    const { user } = setup({ saveMonthlyInvest: async () => ({ ok: false, error: 'Montant invalide' }) });
+    const input = screen.getByLabelText('Montant mensuel à investir');
+    expect(input).not.toHaveAttribute('aria-invalid');
+    await user.click(save('Investissement mensuel'));
+    const alert = await section('Investissement mensuel').findByRole('alert');
+    expect(alert).toHaveTextContent('Montant invalide');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input.getAttribute('aria-describedby')).toBe(alert.id);
+    await user.type(input, '1');
+    expect(input).not.toHaveAttribute('aria-invalid');
+  });
+
+  it('le succès est annoncé par un statut poli, pas par une alerte', async () => {
+    const { user } = setup();
+    await user.click(save('Investissement mensuel'));
+    expect(await section('Investissement mensuel').findByRole('status')).toHaveTextContent('Enregistré');
+    expect(section('Investissement mensuel').queryByRole('alert')).not.toBeInTheDocument();
+  });
+
   it('une action qui lève une exception affiche un message générique', async () => {
     const { user } = setup({ saveMonthlyInvest: async () => { throw new Error('réseau'); } });
     await user.click(save('Investissement mensuel'));
-    expect(await section('Investissement mensuel').findByText("L'enregistrement a échoué. Réessaie dans un instant.")).toBeInTheDocument();
+    expect(await section('Investissement mensuel').findByText(GENERIC_ERROR)).toBeInTheDocument();
   });
 
   it('modifier la saisie efface « Enregistré »', async () => {
@@ -222,6 +243,37 @@ describe('StrategieView — cibles par classe', () => {
     expect(await section('Cibles par classe').findByText('La somme des cibles dépasse 100 %')).toBeInTheDocument();
     expect(input).toHaveValue('15');
     expect(section('Cibles par classe').queryByText('Enregistré')).not.toBeInTheDocument();
+  });
+
+  it('après une suppression réussie, une sauvegarde ultérieure ne réclame pas le pourcentage supprimé', async () => {
+    const { actions, user } = setup();
+    await user.clear(screen.getByLabelText('Cible Startups (%)'));
+    await user.click(save('Cibles par classe'));
+    expect(await section('Cibles par classe').findByText('Enregistré')).toBeInTheDocument();
+    expect(actions.saveTarget).toHaveBeenCalledWith('Startups', null, null);
+    expect(screen.getByLabelText('Actif principal Startups')).toHaveValue('');
+
+    actions.saveTarget.mockClear();
+    await type(user, screen.getByLabelText('Cible Crypto (%)'), '12');
+    await user.click(save('Cibles par classe'));
+    await waitFor(() => expect(actions.saveTarget).toHaveBeenCalledTimes(1));
+    expect(actions.saveTarget).toHaveBeenCalledWith('Crypto', 12, 'crypto');
+    expect(section('Cibles par classe').queryByText(/Indique le pourcentage/)).not.toBeInTheDocument();
+  });
+
+  it('signale les cibles enregistrées dans Notion pour une classe non pilotable', () => {
+    const data: Dashboard = {
+      ...fixtureDashboard,
+      strategy: { ...fixtureDashboard.strategy, targets: { ...fixtureDashboard.strategy.targets, 'Épargne': 0.2 } },
+    };
+    setup({}, data);
+    expect(section('Cibles par classe').getByText('Cible ignorée dans Notion : Épargne 20 %')).toBeInTheDocument();
+    expect(section('Cibles par classe').getByText('Total des cibles : 88 %')).toBeInTheDocument();
+  });
+
+  it('aucune ligne « ignorée » quand toutes les cibles sont pilotables', () => {
+    setup();
+    expect(screen.queryByText(/ignorée/)).not.toBeInTheDocument();
   });
 
   it('indique une cible sans actif principal', async () => {

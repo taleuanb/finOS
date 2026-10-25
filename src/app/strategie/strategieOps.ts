@@ -21,7 +21,7 @@ const MAX_ZONES = 8;
 const MAX_LABEL = 40;
 const EPSILON = 1e-6;
 
-const GENERIC_ERROR = "L'enregistrement a échoué. Réessaie dans un instant.";
+export const GENERIC_ERROR = "L'enregistrement a échoué. Réessaie dans un instant.";
 const fail = (error: string): ActionResult => ({ ok: false, error });
 const round2 = (n: number) => Math.round(n * 100) / 100;
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
@@ -52,6 +52,9 @@ export async function saveTargetWith(
   repo: Repo, assetClass: AssetClass, percent: number | null, mainAssetId: string | null,
 ): Promise<ActionResult> {
   if (!PILOTABLE_CLASSES.includes(assetClass)) return fail('Classe invalide');
+  if (mainAssetId !== null && mainAssetId !== undefined && typeof mainAssetId !== 'string') {
+    return fail('Actif principal invalide pour cette classe');
+  }
   const key = STRATEGY_KEY.targetPrefix + assetClass;
   try {
     if (percent === null) {
@@ -69,7 +72,7 @@ export async function saveTargetWith(
 
     const { targets } = await repo.getStrategy();
     const others = Object.entries(targets)
-      .filter(([cls]) => cls !== assetClass)
+      .filter(([cls]) => cls !== assetClass && PILOTABLE_CLASSES.includes(cls as AssetClass))
       .reduce((sum, [, fraction]) => sum + (fraction ?? 0) * 100, 0);
     if (others + round2(percent) > 100 + EPSILON) return fail('La somme des cibles dépasse 100 %');
 
@@ -101,6 +104,14 @@ export async function saveSpecialAssetsWith(
       if (id === null) continue;
       const asset = typeof id === 'string' ? assets.get(id) : undefined;
       if (!asset || asset.assetClass !== s.cls) return fail(s.error);
+    }
+    if (requested.some((s) => s.prop !== 'savingsAssetId')) {
+      const stored = await repo.getStrategy();
+      const effective = (prop: SpecialKey) => (input[prop] !== undefined ? input[prop] : stored[prop]);
+      const gold = effective('goldAssetId');
+      if (typeof gold === 'string' && gold === effective('silverAssetId')) {
+        return fail('L’or et l’argent doivent être deux actifs différents');
+      }
     }
     for (const s of requested) {
       const id = input[s.prop];

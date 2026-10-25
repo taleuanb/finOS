@@ -300,6 +300,177 @@ describe('EpargneView — simulateur', () => {
   });
 });
 
+describe('EpargneView — mode masqué (fuites)', () => {
+  const hide = () => localStorage.setItem('wos.display', JSON.stringify({ currency: 'EUR', hidden: true }));
+  const amountInputs = (root: ParentNode = document) =>
+    [...root.querySelectorAll('input')].filter((i) => i.type !== 'date' && /\d/.test(i.value));
+
+  it('le simulateur Annuel ne laisse fuiter ni montant dans les justifications ni dans le champ', async () => {
+    hide();
+    const user = userEvent.setup();
+    renderView(fixtureDashboard);
+    await waitFor(() => expect(screen.queryByText('330 €')).not.toBeInTheDocument());
+    await user.click(within(screen.getByRole('region', { name: 'Simulateur' })).getByRole('button', { name: 'Annuel' }));
+    expect(screen.getByRole('region', { name: 'Simulateur' }).textContent).toMatch(/Sous la cible de/);
+    expect(document.body.textContent).not.toMatch(/\d\s?€/);
+    const inputs = amountInputs();
+    expect(inputs.length).toBeGreaterThan(0);
+    for (const i of inputs) expect(i.type).toBe('password');
+  });
+
+  it('la proposition masque les montants (champs et justifications)', async () => {
+    hide();
+    renderView(unvalidated({ proposal: proposal.map((l) => (l.assetId === 'hsbc' ? { ...l, reason: 'Sous la cible de 1 841 €' } : l)) }));
+    await waitFor(() => expect(screen.queryByText(/900 €/)).not.toBeInTheDocument());
+    expect(document.body.textContent).not.toMatch(/\d\s?€/);
+    const inputs = amountInputs();
+    expect(inputs.length).toBeGreaterThanOrEqual(proposal.length);
+    for (const i of inputs) expect(i.type).toBe('password');
+  });
+
+  it('la feuille de déclaration masque le montant prérempli', async () => {
+    hide();
+    const user = userEvent.setup();
+    renderView(fixtureDashboard);
+    await waitFor(() => expect(screen.queryByText('330 €')).not.toBeInTheDocument());
+    await user.click(within(rowOf(/Syla/)).getByRole('button', { name: /Déclarer l'achat/ }));
+    expect(within(screen.getByRole('dialog')).getByLabelText(/Montant/)).toHaveAttribute('type', 'password');
+  });
+
+  it("affiche les montants des justifications dans la devise d'affichage", async () => {
+    localStorage.setItem('wos.display', JSON.stringify({ currency: 'MAD', hidden: false }));
+    const user = userEvent.setup();
+    renderView(fixtureDashboard);
+    await waitFor(() => expect(screen.queryByText('330 €')).not.toBeInTheDocument());
+    await user.click(within(screen.getByRole('region', { name: 'Simulateur' })).getByRole('button', { name: 'Annuel' }));
+    const text = screen.getByRole('region', { name: 'Simulateur' }).textContent ?? '';
+    expect(text).toMatch(/Sous la cible de [\d ]+ MAD/);
+    expect(text).not.toMatch(/Sous la cible de [\d ]+ €/);
+  });
+});
+
+describe('EpargneView — feuille : devise de l’actif', () => {
+  const madData = (): Dashboard => ({
+    ...fixtureDashboard,
+    assets: fixtureDashboard.assets.map((a) => (a.id === 'syla' ? { ...a, currency: 'MAD' as const } : a)),
+  });
+
+  it("préremplit et édite le montant dans la devise de l'actif (converti depuis l'€)", async () => {
+    const user = userEvent.setup();
+    renderView(madData());
+    await user.click(within(rowOf(/Syla/)).getByRole('button', { name: /Déclarer l'achat/ }));
+    const dialog = screen.getByRole('dialog');
+    // 600 € × 10,85 = 6 510 MAD
+    expect(within(dialog).getByLabelText('Montant (MAD)')).toHaveValue('6510');
+    await user.click(within(dialog).getByRole('button', { name: 'Confirmer' }));
+    await waitFor(() => expect(declarePurchase).toHaveBeenCalledTimes(1));
+    expect(declarePurchase.mock.calls[0].slice(0, 3)).toEqual(['syla', '2026-11', 6510]);
+  });
+
+  it('garde le libellé en € pour un actif en euros', async () => {
+    const user = userEvent.setup();
+    renderView(fixtureDashboard);
+    await user.click(within(rowOf(/Syla/)).getByRole('button', { name: /Déclarer l'achat/ }));
+    expect(within(screen.getByRole('dialog')).getByLabelText('Montant (€)')).toHaveValue('600');
+  });
+});
+
+describe('EpargneView — feuille : focus', () => {
+  const open = async (user: ReturnType<typeof userEvent.setup>) => {
+    const trigger = within(rowOf(/Syla/)).getByRole('button', { name: /Déclarer l'achat/ });
+    await user.click(trigger);
+    return trigger;
+  };
+
+  it("place le focus dans la feuille à l'ouverture", async () => {
+    const user = userEvent.setup();
+    renderView(fixtureDashboard);
+    await open(user);
+    expect(screen.getByRole('dialog')).toContainElement(document.activeElement as HTMLElement);
+  });
+
+  it('rend le focus au bouton déclencheur après Annuler', async () => {
+    const user = userEvent.setup();
+    renderView(fixtureDashboard);
+    const trigger = await open(user);
+    await user.click(screen.getByRole('button', { name: 'Annuler' }));
+    expect(trigger).toHaveFocus();
+  });
+
+  it('rend le focus au déclencheur après Échap (écouteur sur le document)', async () => {
+    const user = userEvent.setup();
+    renderView(fixtureDashboard);
+    const trigger = await open(user);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('Échap fonctionne même si le focus est sorti de la feuille', async () => {
+    const user = userEvent.setup();
+    renderView(fixtureDashboard);
+    await open(user);
+    (document.activeElement as HTMLElement).blur();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('rend le focus au déclencheur après le clic sur le fond', async () => {
+    const user = userEvent.setup();
+    renderView(fixtureDashboard);
+    const trigger = await open(user);
+    await user.click(document.querySelector('[data-backdrop]') as HTMLElement);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
+  it('piège Tab et Maj+Tab dans la feuille', async () => {
+    const user = userEvent.setup();
+    renderView(fixtureDashboard);
+    await open(user);
+    const dialog = screen.getByRole('dialog');
+    const confirm = within(dialog).getByRole('button', { name: 'Confirmer' });
+    const first = within(dialog).getByLabelText(/Montant/);
+
+    confirm.focus();
+    await user.tab();
+    expect(first).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(confirm).toHaveFocus();
+    for (let i = 0; i < 8; i++) {
+      await user.tab();
+      expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    }
+  });
+});
+
+describe('EpargneView — proposition : cas limites', () => {
+  it('écarte les lignes à 0 du plan envoyé', async () => {
+    const user = userEvent.setup();
+    renderView(unvalidated());
+    const per = screen.getByLabelText(/Pertinence Retraite/);
+    await user.clear(per);
+    await user.type(per, '0');
+    const hsbc = screen.getByLabelText(/HSBC/);
+    await user.clear(hsbc);
+    await user.type(hsbc, '600');
+    await user.click(screen.getByRole('button', { name: 'Valider le plan' }));
+    await waitFor(() => expect(validatePlan).toHaveBeenCalledTimes(1));
+    const sent = validatePlan.mock.calls[0][1] as AllocationLine[];
+    expect(sent.map((l) => l.assetId)).toEqual(['hsbc', 'or', 'syla']);
+  });
+
+  it('exige le total au centime près', async () => {
+    const user = userEvent.setup();
+    renderView(unvalidated());
+    const per = screen.getByLabelText(/Pertinence Retraite/);
+    await user.clear(per);
+    await user.type(per, '100,5');
+    expect(screen.getByRole('button', { name: 'Valider le plan' })).toBeDisabled();
+    expect(screen.getByText('Total ≠ 900 €')).toBeInTheDocument();
+  });
+});
+
 describe('MonthPill', () => {
   it('affiche le mois en français', () => {
     render(<MonthPill month="2026-11" />);

@@ -1,12 +1,12 @@
 'use client';
 
 import Link from 'next/link';
-import { useId, useMemo, useState, useTransition, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, useTransition, type FormEvent } from 'react';
 import { allocate } from '@/domain/allocation';
 import { parisDate } from '@/domain/dates';
-import { formatMoney } from '@/domain/money';
+import { formatMoney, fromEur } from '@/domain/money';
 import { AllocationError } from '@/domain/types';
-import type { AllocationLine, Asset } from '@/domain/types';
+import type { AllocationLine, Asset, Currency, FxRates } from '@/domain/types';
 import type { Dashboard, PlanLineView } from '@/lib/dashboard';
 import { Badge } from '@/ui/Badge';
 import { Card } from '@/ui/Card';
@@ -22,7 +22,7 @@ type ActionResult = { ok: true } | { ok: false; error: string };
 export interface EpargneViewProps {
   data: Dashboard;
   validatePlan: (month: string, lines: AllocationLine[]) => Promise<ActionResult>;
-  declarePurchase: (assetId: string, month: string, amountEur: number, date: string, fineGrams?: number) => Promise<ActionResult>;
+  declarePurchase: (assetId: string, month: string, amount: number, date: string, fineGrams?: number) => Promise<ActionResult>;
 }
 
 const METALS = 'Métaux précieux';
@@ -39,6 +39,20 @@ function parseAmount(s: string): number | null {
 }
 
 const toField = (n: number) => String(Math.round(n * 100) / 100).replace('.', ',');
+const cents = (n: number) => Math.round(n * 100);
+
+const CURRENCY_SYMBOL: Record<Currency, string> = { EUR: '€', MAD: 'MAD', USD: '$' };
+
+/**
+ * Les justifications de l'algorithme contiennent des montants en € (« Sous la cible de 841 € ») :
+ * on les affiche dans la devise d'affichage, et masqués en mode masqué.
+ */
+function localizeReason(reason: string, d: { currency: Currency; hidden: boolean; fx: FxRates }): string {
+  return reason.replace(/\d[\d\s]*(?:,\d+)?\s?€/g, (m) => {
+    const n = Number(m.replace(/[^\d,]/g, '').replace(',', '.'));
+    return Number.isFinite(n) ? formatDisplayMoney(n, d) : HIDDEN_TEXT;
+  });
+}
 
 function monthLong(month: string): string {
   const [y, m] = month.split('-').map(Number);
@@ -96,23 +110,62 @@ function ErrorText({ children }: { children: React.ReactNode }) {
 
 // --- Feuille « Déclarer l'achat » ---------------------------------------------------------------
 
+const FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
 function DeclareSheet({
-  line, isMetal, month, onClose, declarePurchase,
+  line, isMetal, currency, month, onClose, declarePurchase,
 }: {
-  line: PlanLineView; isMetal: boolean; month: string; onClose: () => void;
+  line: PlanLineView; isMetal: boolean; currency: Currency; month: string; onClose: () => void;
   declarePurchase: EpargneViewProps['declarePurchase'];
 }) {
   const uid = useId();
-  const [amount, setAmount] = useState(toField(line.toInvestEur));
+  const d = useDisplay();
+  const dialogRef = useRef<HTMLFormElement>(null);
+  const onCloseRef = useRef(onClose);
+  const [amount, setAmount] = useState(() => toField(fromEur(line.toInvestEur, currency, d.fx)));
   const [date, setDate] = useState(() => parisDate(new Date()));
   const [grams, setGrams] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
+  useEffect(() => { onCloseRef.current = onClose; });
+
+  // Échap et piège du focus (Tab / Maj+Tab) : écouteur unique sur le document.
+  useEffect(() => {
+    function onKey(e: globalThis.KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const root = dialogRef.current;
+      if (!root) return;
+      const items = [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].sort((x, y) =>
+        x.compareDocumentPosition(y) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+      if (items.length === 0) return void e.preventDefault();
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      if (!root.contains(active)) {
+        e.preventDefault();
+        first.focus();
+      } else if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
   function submit(e: FormEvent) {
     e.preventDefault();
-    const amountEur = parseAmount(amount);
-    if (amountEur === null || amountEur <= 0) return setError('Saisis un montant supérieur à 0.');
+    const value = parseAmount(amount);
+    if (value === null || value <= 0) return setError('Saisis un montant supérieur à 0.');
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return setError('Saisis une date valide.');
     let fineGrams: number | undefined;
     if (isMetal) {
@@ -124,8 +177,8 @@ function DeclareSheet({
     startTransition(async () => {
       try {
         const res = isMetal
-          ? await declarePurchase(line.assetId, month, amountEur, date, fineGrams)
-          : await declarePurchase(line.assetId, month, amountEur, date);
+          ? await declarePurchase(line.assetId, month, value, date, fineGrams)
+          : await declarePurchase(line.assetId, month, value, date);
         if (res.ok) onClose();
         else setError(res.error);
       } catch {
@@ -134,14 +187,11 @@ function DeclareSheet({
     });
   }
 
-  function onKeyDown(e: KeyboardEvent) {
-    if (e.key === 'Escape') onClose();
-  }
-
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40" onKeyDown={onKeyDown}>
-      <div className="absolute inset-0" aria-hidden="true" onClick={onClose} />
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40">
+      <div data-backdrop className="absolute inset-0" aria-hidden="true" onClick={onClose} />
       <form
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={`${uid}-title`}
@@ -150,9 +200,10 @@ function DeclareSheet({
       >
         <h2 id={`${uid}-title`} className="text-[17px] font-bold">Déclarer l&apos;achat · {line.assetName}</h2>
         <label className="flex flex-col gap-1.5 text-[13px] font-semibold text-muted" htmlFor={`${uid}-amount`}>
-          Montant (€)
+          Montant ({CURRENCY_SYMBOL[currency]})
           <input
-            id={`${uid}-amount`} className={FIELD} inputMode="decimal" autoFocus
+            id={`${uid}-amount`} className={FIELD} inputMode="decimal" autoFocus autoComplete="off"
+            type={d.hidden ? 'password' : 'text'}
             value={amount} onChange={(e) => setAmount(e.target.value)}
           />
         </label>
@@ -189,9 +240,10 @@ function DeclareSheet({
 // --- Plan validé -----------------------------------------------------------------------------------
 
 function PlanRow({ line, asset, strategy, onDeclare }: {
-  line: PlanLineView; asset: Asset | undefined; strategy: Dashboard['strategy']; onDeclare: () => void;
+  line: PlanLineView; asset: Asset | undefined; strategy: Dashboard['strategy']; onDeclare: (opener: HTMLElement) => void;
 }) {
   const uid = useId();
+  const d = useDisplay();
   const { bg, fg } = avatarStyle(asset, strategy);
   const declared = line.status === 'declared';
   return (
@@ -200,7 +252,7 @@ function PlanRow({ line, asset, strategy, onDeclare }: {
         <Avatar name={line.assetName} bg={bg} fg={fg} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span id={uid} className="text-[14px] font-bold">{line.assetName}</span>
-          <span className="text-xs text-muted">Prévu <Money eur={line.plannedEur} /> · {line.reason}</span>
+          <span className="text-xs text-muted">Prévu <Money eur={line.plannedEur} /> · {localizeReason(line.reason, d)}</span>
         </div>
         {declared ? (
           <Badge tone="gain" className="whitespace-nowrap !px-2.5 !py-[5px] !text-xs">✓ Déclaré</Badge>
@@ -217,7 +269,7 @@ function PlanRow({ line, asset, strategy, onDeclare }: {
             ) : null}
           </span>
           <button
-            type="button" onClick={onDeclare}
+            type="button" onClick={(e) => onDeclare(e.currentTarget)}
             className="min-h-11 rounded-full bg-foreground px-3.5 text-xs font-semibold text-white"
           >
             Déclarer l&apos;achat
@@ -242,13 +294,16 @@ function Proposal({ data, validatePlan }: { data: Dashboard; validatePlan: Eparg
   const amounts = fields.map(parseAmount);
   const allValid = amounts.every((a) => a !== null);
   const total = amounts.reduce<number>((s, a) => s + (a ?? 0), 0);
-  const totalOk = allValid && Math.round(total) === Math.round(investEur);
+  const totalOk = allValid && cents(total) === cents(investEur);
 
   function validate() {
     setError(null);
     startTransition(async () => {
       try {
-        const res = await validatePlan(data.plan.month, proposal.map((l, i) => ({ ...l, amount: amounts[i] as number })));
+        const toSend = proposal
+          .map((l, i) => ({ ...l, amount: amounts[i] as number }))
+          .filter((l) => l.amount > 0);
+        const res = await validatePlan(data.plan.month, toSend);
         if (!res.ok) setError(res.error);
       } catch {
         setError("Le plan n'a pas pu être validé. Réessaie.");
@@ -271,12 +326,14 @@ function Proposal({ data, validatePlan }: { data: Dashboard; validatePlan: Eparg
               <Avatar name={nameOf(l.assetId)} bg={bg} fg={fg} />
               <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                 <span className="text-[14px] font-bold">{nameOf(l.assetId)}</span>
-                <span className="text-xs text-muted">{l.reason}</span>
+                <span className="text-xs text-muted">{localizeReason(l.reason, d)}</span>
               </div>
               <div className="flex items-center gap-1.5">
                 <input
                   aria-label={`Montant ${nameOf(l.assetId)}`}
                   inputMode="decimal"
+                  autoComplete="off"
+                  type={d.hidden ? 'password' : 'text'}
                   value={fields[i]}
                   onChange={(e) => setFields((f) => f.map((v, j) => (j === i ? e.target.value : v)))}
                   className="min-h-11 w-24 rounded-xl border border-border bg-background px-3 text-right text-[15px]"
@@ -308,6 +365,7 @@ function Proposal({ data, validatePlan }: { data: Dashboard; validatePlan: Eparg
 type SimMode = 'monthly' | 'yearly';
 
 function Simulator({ data }: { data: Dashboard }) {
+  const d = useDisplay();
   const [mode, setMode] = useState<SimMode>('monthly');
   const [amount, setAmount] = useState(String(Math.round(data.budget.investEur)));
   const nameOf = (id: string) => data.assets.find((a) => a.id === id)?.name ?? id;
@@ -344,7 +402,10 @@ function Simulator({ data }: { data: Dashboard }) {
       />
       <label className="flex flex-col gap-1.5 text-[13px] font-semibold text-muted">
         Montant à investir
-        <input className={FIELD} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} />
+        <input
+          className={FIELD} inputMode="numeric" autoComplete="off" type={d.hidden ? 'password' : 'text'}
+          value={amount} onChange={(e) => setAmount(e.target.value)}
+        />
       </label>
       {result && 'error' in result ? <ErrorText>{result.error}</ErrorText> : null}
       {result && 'lines' in result ? (
@@ -354,7 +415,7 @@ function Simulator({ data }: { data: Dashboard }) {
               <li key={l.assetId} className="flex items-start justify-between gap-3 border-t border-[#F1F2F4] py-2.5">
                 <div className="flex min-w-0 flex-col gap-0.5">
                   <span className="text-[14px] font-bold">{nameOf(l.assetId)}</span>
-                  <span className="text-xs text-muted">{l.reason}</span>
+                  <span className="text-xs text-muted">{localizeReason(l.reason, d)}</span>
                 </div>
                 <span data-amount className="text-[14px] font-bold"><Money eur={l.amount} /></span>
               </li>
@@ -376,6 +437,15 @@ export function EpargneView({ data, validatePlan, declarePurchase }: EpargneView
   const d = useDisplay();
   const { plan, budget } = data;
   const [declaring, setDeclaring] = useState<PlanLineView | null>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+
+  /** Ferme la feuille et rend le focus au bouton qui l'a ouverte (si toujours présent). */
+  function closeSheet() {
+    setDeclaring(null);
+    const opener = openerRef.current;
+    openerRef.current = null;
+    if (opener?.isConnected) opener.focus();
+  }
   const strategyUrl = process.env.NEXT_PUBLIC_NOTION_STRATEGY_URL;
   const savingsAsset = data.assets.find((a) => a.id === data.strategy.savingsAssetId);
   const assetOf = (id: string) => data.assets.find((a) => a.id === id);
@@ -454,7 +524,7 @@ export function EpargneView({ data, validatePlan, declarePurchase }: EpargneView
             {plan.lines.map((l) => (
               <PlanRow
                 key={l.assetId} line={l} asset={assetOf(l.assetId)} strategy={data.strategy}
-                onDeclare={() => setDeclaring(l)}
+                onDeclare={(opener) => { openerRef.current = opener; setDeclaring(l); }}
               />
             ))}
           </ul>
@@ -513,8 +583,9 @@ export function EpargneView({ data, validatePlan, declarePurchase }: EpargneView
           key={declaring.assetId}
           line={declaring}
           isMetal={assetOf(declaring.assetId)?.assetClass === METALS}
+          currency={assetOf(declaring.assetId)?.currency ?? 'EUR'}
           month={plan.month}
-          onClose={() => setDeclaring(null)}
+          onClose={closeSheet}
           declarePurchase={declarePurchase}
         />
       ) : null}

@@ -24,7 +24,7 @@ export default function LoginPage() {
       const data = (await response.json().catch(() => null)) as { error?: string } | null;
       setError(data?.error ?? 'Mot de passe incorrect');
     } catch {
-      setError('Connexion impossible. Réessayez.');
+      setError('Connexion impossible. Réessaie.');
     }
     setPending(false);
   }

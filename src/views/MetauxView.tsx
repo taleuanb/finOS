@@ -2,12 +2,14 @@
 
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { parisDate } from '@/domain/dates';
 import { formatMoney, formatPct } from '@/domain/money';
 import { neutralZone } from '@/domain/zones';
 import type { MetalZone } from '@/domain/types';
 import type { Dashboard, MetalPosition, MetalPurchaseView } from '@/lib/dashboard';
 import { Badge } from '@/ui/Badge';
 import { Card } from '@/ui/Card';
+import { HIDDEN_TEXT, useDisplay } from '@/ui/display';
 import { Money } from '@/ui/Money';
 import { RatioChart } from '@/ui/charts/RatioChart';
 import { formatDateFr } from '@/ui/charts/shared';
@@ -22,7 +24,21 @@ const num = (n: number, min: number, max = min) =>
     .replace(/[  ]/g, ' ')
     .replace(/-/g, '−');
 const ratioText = (r: number) => num(r, 1);
-const gramsText = (g: number) => `${num(g, 0, 2)} g`;
+
+/** Poids fin : une position détenue (poids × cours public = valeur), donc masqué en mode masqué. */
+function useGramsText(): (g: number) => string {
+  const { hidden } = useDisplay();
+  return (g) => (hidden ? HIDDEN_TEXT : `${num(g, 0, 2)} g`);
+}
+
+/** Date de fraîcheur des données, au jour de Paris ; retombe sur `asOf` si `lastSyncOk` est absent ou invalide. */
+function staleDay(data: Dashboard): string {
+  if (data.lastSyncOk) {
+    const t = new Date(data.lastSyncOk);
+    if (!Number.isNaN(t.getTime())) return parisDate(t);
+  }
+  return data.asOf;
+}
 const pricePerKg = (eur: number) => `${formatMoney(eur, 'EUR')} / kg`;
 
 function segmentColor(goldShare: number): string {
@@ -70,6 +86,7 @@ function Kpi({ label, children }: { label: string; children: ReactNode }) {
 }
 
 function MetalCard({ metal, name, position }: { metal: 'gold' | 'silver'; name: string; position: MetalPosition | null }) {
+  const gramsText = useGramsText();
   return (
     <Card aria-label={name} role="region" className="flex flex-col gap-3.5 !p-[18px]">
       <div className="flex items-center gap-3">
@@ -189,6 +206,7 @@ function SignalCard({ data }: { data: Dashboard }) {
 }
 
 function PurchaseRow({ p }: { p: MetalPurchaseView }) {
+  const gramsText = useGramsText();
   const missing = p.fineGrams === 0;
   const meta = [p.nature, formatDateFr(p.date), missing ? null : gramsText(p.fineGrams)].filter(Boolean).join(' · ');
   const highPremium = p.premium !== null && p.premium > PREMIUM_WARNING_THRESHOLD;
@@ -214,7 +232,7 @@ function PurchaseRow({ p }: { p: MetalPurchaseView }) {
           {p.premium === null || missing ? (
             '—'
           ) : (
-            <span className={highPremium ? WARNING : 'text-gain'}>{formatPct(p.premium)}</span>
+            <span className={highPremium ? WARNING : 'text-muted'}>{formatPct(p.premium)}</span>
           )}
         </span>
       </div>
@@ -229,13 +247,12 @@ export function MetauxView({ data }: { data: Dashboard }) {
   const costEur = positions.reduce((s, p) => s + p.costEur, 0);
   const gainEur = valueEur - costEur;
   const gainPct = costEur > 0 ? gainEur / costEur : null;
-  const staleDate = data.lastSyncOk ?? data.asOf;
 
   return (
     <div className="flex flex-col gap-4">
       {data.stale ? (
         <p role="status" className="rounded-2xl border border-[#F6D3B5] bg-[#FFF6EE] px-4 py-3 text-[13px] font-semibold text-[#9A4A0E]">
-          Données du {formatDateFr(staleDate)}
+          Données du {formatDateFr(staleDay(data))}
         </p>
       ) : null}
 

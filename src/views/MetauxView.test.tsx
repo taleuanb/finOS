@@ -117,11 +117,37 @@ describe('MetauxView', () => {
     expect(screen.getByText(/Données du 20\/10\/2026/)).toBeTruthy();
   });
 
-  it('masque les montants détenus en mode masqué mais pas les cours', () => {
+  it('date la bannière de données anciennes à Paris (23:30 UTC le 31/10 = 01/11)', () => {
+    view({ ...fixtureDashboard, stale: true, lastSyncOk: '2026-10-31T23:30:00Z' });
+    expect(screen.getByText('Données du 01/11/2026')).toBeTruthy();
+  });
+
+  it('retombe sur asOf si lastSyncOk est absent ou invalide', () => {
+    view({ ...fixtureDashboard, stale: true, lastSyncOk: 'pas une date', asOf: '2026-10-25' });
+    expect(screen.getByText('Données du 25/10/2026')).toBeTruthy();
+  });
+
+  it('une prime négative ou faible n\'est pas en vert', () => {
+    const base = fixtureDashboard.metals.purchases.find((p) => p.fineGrams > 0)!;
+    view(withMetals({ purchases: [{ ...base, movementId: 'neg', label: 'Achat sous spot', premium: -0.02 }] }));
+    const el = within(screen.getByText('Achat sous spot').closest('li')!).getByText('−2,00 %');
+    expect(el.className).not.toContain('text-gain');
+  });
+
+  it('masque les montants et les poids détenus en mode masqué mais pas les cours', () => {
     localStorage.setItem('wos.display', JSON.stringify({ currency: 'EUR', hidden: true }));
-    view(fixtureDashboard);
+    const { container } = view(fixtureDashboard);
     expect(screen.getByText('125 926 € / kg')).toBeTruthy();
-    expect(screen.queryByText('165 €')).toBeNull();
-    expect(screen.queryByText('547 €')).toBeNull();
+    const text = (container.textContent ?? '').replace('Lingot 500 g', 'Lingot'); // le libellé saisi n'est pas un poids affiché
+    expect(text).not.toMatch(/\d+(,\d+)? g\b/);
+    for (const eur of ['165 €', '135 €', '547 €', '555 €', '600 €', '4 294 €']) expect(text).not.toContain(eur);
+    const m = fixtureDashboard.metals;
+    expect(text).not.toContain(Math.round(m.gold!.valueEur + m.silver!.valueEur).toLocaleString('fr-FR').replace(/[\u202f\u00a0]/g, ' '));
+    expect(text).not.toContain(Math.round(m.gold!.costEur).toLocaleString('fr-FR').replace(/[\u202f\u00a0]/g, ' ') + ' €');
+  });
+
+  it('affiche les poids en mode normal', () => {
+    view(fixtureDashboard);
+    expect(screen.getByText('Pièce · 19/03/2025 · 6,45 g')).toBeTruthy();
   });
 });

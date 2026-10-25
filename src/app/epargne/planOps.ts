@@ -25,7 +25,10 @@ function isRealDate(s: string): boolean {
   return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d;
 }
 
-/** Écrit les lignes du plan du mois courant (Paris) ; refuse si le mois est déjà validé. */
+/**
+ * Écrit les lignes du plan du mois courant (Paris) ; refuse si le mois est déjà validé.
+ * Idempotent sur une nouvelle tentative : une écriture partielle identique à la demande est complétée.
+ */
 export async function validatePlanWith(
   repo: Repo, month: string, lines: AllocationLine[], now: Date = new Date(),
 ): Promise<ActionResult> {
@@ -50,9 +53,18 @@ export async function validatePlanWith(
     const assets = await repo.listAssets();
     const active = new Set(assets.filter((a) => !a.archived).map((a) => a.id));
     if (lines.some((l) => !active.has(l.assetId))) return fail('Actif inconnu ou archivé');
-    const existing = await repo.listPlan();
-    if (existing.some((l) => l.month === month)) return fail(`Plan déjà validé pour ${month}`);
-    await repo.createPlanLines(lines.map((l) => ({ month, assetId: l.assetId, amount: cents(l.amount), origin: l.origin })));
+    const requested = lines.map((l) => ({ month, assetId: l.assetId, amount: cents(l.amount), origin: l.origin }));
+    const existing = (await repo.listPlan()).filter((l) => l.month === month);
+    // Nouvelle tentative après une écriture interrompue : si les lignes déjà écrites sont exactement une partie
+    // de la demande, on n'écrit que celles qui manquent ; sinon le mois est déjà validé.
+    const wanted = new Map(requested.map((l) => [l.assetId, l]));
+    const isPartOfRequest = existing.every((l) => {
+      const w = wanted.get(l.assetId);
+      return w !== undefined && cents(l.amount) === w.amount && l.origin === w.origin;
+    });
+    const missing = requested.filter((l) => !existing.some((e) => e.assetId === l.assetId));
+    if (existing.length > 0 && (!isPartOfRequest || missing.length === 0)) return fail(`Plan déjà validé pour ${month}`);
+    await repo.createPlanLines(missing);
     return { ok: true };
   } catch {
     return fail(GENERIC_ERROR);

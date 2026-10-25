@@ -57,6 +57,18 @@ export function periodStart(period: Period, asOf: string): string | null {
   return `${ty}-${String(tm).padStart(2, '0')}-${String(Math.min(day, dim)).padStart(2, '0')}`;
 }
 
+const SYNC_FMT = new Intl.DateTimeFormat('fr-FR', {
+  timeZone: 'Europe/Paris', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
+});
+
+/** « 25/10 07:00 » à l'heure de Paris ; « jamais » sans synchro réussie (ou date illisible). */
+export function lastSyncText(iso: string | null): string {
+  const t = iso ? new Date(iso) : null;
+  if (!t || Number.isNaN(t.getTime())) return 'jamais';
+  const p = Object.fromEntries(SYNC_FMT.formatToParts(t).map((x) => [x.type, x.value]));
+  return `${p.day}/${p.month} ${p.hour}:${p.minute}`;
+}
+
 function shortDate(iso: string): string {
   return new Date(`${iso}T00:00:00Z`).toLocaleDateString('fr-FR', {
     day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
@@ -178,6 +190,7 @@ export function SyntheseView({ data: d }: { data: Dashboard }) {
           <span className="text-sm font-medium text-muted">Patrimoine net · {shortDate(d.asOf)}</span>
           <CurrencyToggle />
         </div>
+        <span className="text-xs text-muted">{`Dernière synchro : ${lastSyncText(d.lastSyncOk)}`}</span>
         <Money eur={d.totals.netEur} className="text-4xl font-extrabold leading-[1.05] tracking-[-0.03em]" />
         <div className="flex flex-wrap items-center gap-2">
           <VariationBadge variation={variation} />

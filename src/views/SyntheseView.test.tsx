@@ -125,3 +125,17 @@ describe('SyntheseView — mode démo (I9)', () => {
   });
 });
 
+describe('SyntheseView — dernière synchro (I5)', () => {
+  it('affiche en permanence la date de la dernière synchro, à l’heure de Paris', () => {
+    renderView({ ...fixtureDashboard, lastSyncOk: '2026-10-24T05:00:00.000Z' }); // heure d'été : UTC+2
+    expect(screen.getByText('Dernière synchro : 24/10 07:00')).toBeInTheDocument();
+    cleanup();
+    renderView({ ...fixtureDashboard, lastSyncOk: '2026-10-25T05:00:00.000Z' }); // heure d'hiver dès le 25 : UTC+1
+    expect(screen.getByText('Dernière synchro : 25/10 06:00')).toBeInTheDocument();
+  });
+  it('« jamais » sans synchro réussie', () => {
+    renderView({ ...fixtureDashboard, lastSyncOk: null });
+    expect(screen.getByText('Dernière synchro : jamais')).toBeInTheDocument();
+  });
+});
+

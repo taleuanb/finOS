@@ -87,7 +87,7 @@ npx tsx --env-file=.env.local scripts/import-metals.ts autre.csv  # ou un autre 
 
 ## Synchronisation manuelle
 
-La synchro (cours, valorisation, instantané d'historique) se lance à la demande par `POST /api/sync`, avec le cookie de session ou avec le secret du cron. L'app n'a pas encore de bouton dédié :
+La synchro (cours, valorisation, instantané d'historique) se lance à la demande avec le bouton **Synchroniser maintenant** (icône ↻ dans l'en-tête de la Synthèse) : il appelle `POST /api/sync`, annonce « N actifs mis à jour » (et le nombre d'erreurs éventuelles) puis rafraîchit l'écran. La Synthèse affiche en permanence « Dernière synchro : JJ/MM HH:mm » (heure de Paris). Hors de l'app, la même route accepte le secret du cron :
 
 ```bash
 curl -X POST https://<votre-app>.vercel.app/api/sync -H "Authorization: Bearer $CRON_SECRET"

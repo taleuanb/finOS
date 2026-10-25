@@ -1,0 +1,133 @@
+{
+  "object": "page",
+  "id": "m1111111-0000-4000-8000-000000000002",
+  "created_time": "2026-09-01T08:00:00.000Z",
+  "last_edited_time": "2026-10-24T05:00:12.000Z",
+  "created_by": {
+    "id": "u1",
+    "object": "user"
+  },
+  "last_edited_by": {
+    "id": "u1",
+    "object": "user"
+  },
+  "cover": null,
+  "icon": null,
+  "parent": {
+    "type": "data_source_id",
+    "data_source_id": "ds-1",
+    "database_id": "db-1"
+  },
+  "archived": false,
+  "in_trash": false,
+  "url": "https://www.notion.so/m1111111000040008000000000000002",
+  "public_url": null,
+  "properties": {
+    "Libellé": {
+      "id": "title",
+      "type": "title",
+      "title": [
+        {
+          "type": "text",
+          "text": {
+            "content": "20 Francs Suisse",
+            "link": null
+          },
+          "annotations": {
+            "bold": false,
+            "italic": false,
+            "strikethrough": false,
+            "underline": false,
+            "code": false,
+            "color": "default"
+          },
+          "plain_text": "20 Francs Suisse",
+          "href": null
+        }
+      ]
+    },
+    "Date": {
+      "id": "d1",
+      "type": "date",
+      "date": {
+        "start": "2026-03-14",
+        "end": null,
+        "time_zone": null
+      }
+    },
+    "Actif": {
+      "id": "d2",
+      "type": "relation",
+      "relation": [
+        {
+          "id": "a1111111-0000-4000-8000-000000000009"
+        }
+      ],
+      "has_more": false
+    },
+    "Type": {
+      "id": "d3",
+      "type": "select",
+      "select": {
+        "id": "o-d3",
+        "name": "Achat/versement",
+        "color": "default"
+      }
+    },
+    "Nature": {
+      "id": "d4",
+      "type": "select",
+      "select": {
+        "id": "o-d4",
+        "name": "Pièce",
+        "color": "default"
+      }
+    },
+    "Quantité": {
+      "id": "d5",
+      "type": "number",
+      "number": 5.806
+    },
+    "Montant": {
+      "id": "d6",
+      "type": "number",
+      "number": 612.5
+    },
+    "Cours spot jour J": {
+      "id": "d7",
+      "type": "number",
+      "number": 88450
+    },
+    "Prime %": {
+      "id": "d8",
+      "type": "formula",
+      "formula": {
+        "type": "number",
+        "number": 0.0412
+      }
+    },
+    "Mois du plan": {
+      "id": "d9",
+      "type": "rich_text",
+      "rich_text": [
+        {
+          "type": "text",
+          "text": {
+            "content": "2026-03",
+            "link": null
+          },
+          "annotations": {
+            "bold": false,
+            "italic": false,
+            "strikethrough": false,
+            "underline": false,
+            "code": false,
+            "color": "default"
+          },
+          "plain_text": "2026-03",
+          "href": null
+        }
+      ]
+    }
+  }
+}

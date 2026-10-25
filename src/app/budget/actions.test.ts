@@ -8,7 +8,10 @@ import { deleteBudgetLineWith, reorderBudgetWith, saveBudgetLineWith } from './b
 
 const newLine = { name: 'Cinéma', section: 'depense' as const, category: 'Loisirs', monthlyAmount: 25, currency: 'EUR' as const, order: 11 };
 
-beforeEach(() => revalidateTag.mockClear());
+beforeEach(() => {
+  revalidateTag.mockClear();
+  vi.spyOn(console, 'error').mockImplementation(() => {});
+});
 
 describe('saveBudgetLineWith', () => {
   it('crée la ligne puis la modifie', async () => {
@@ -44,6 +47,22 @@ describe('saveBudgetLineWith', () => {
     expect(revalidateTag).not.toHaveBeenCalled();
   });
 
+  it("refuse un id qui n'appartient pas au budget, sans rien écrire", async () => {
+    const repo = new FakeRepo(fixtureSeed);
+    const upsert = vi.spyOn(repo, 'upsertBudgetLine');
+    const r = await saveBudgetLineWith(repo, { ...newLine, id: 'asset-hsbc' });
+    expect(r).toEqual({ ok: false, error: 'Ligne introuvable' });
+    expect(upsert).not.toHaveBeenCalled();
+    expect(revalidateTag).not.toHaveBeenCalled();
+  });
+
+  it('refuse des champs démesurés', async () => {
+    const repo = new FakeRepo(fixtureSeed);
+    expect((await saveBudgetLineWith(repo, { ...newLine, name: 'x'.repeat(201) })).ok).toBe(false);
+    expect((await saveBudgetLineWith(repo, { ...newLine, category: 'x'.repeat(201) })).ok).toBe(false);
+    expect(await saveBudgetLineWith(repo, { ...newLine, monthlyAmount: 10_000_001 })).toEqual({ ok: false, error: 'Montant invalide' });
+  });
+
   it("renvoie une erreur lisible si le dépôt échoue, sans propager l'exception", async () => {
     const repo = new FakeRepo(fixtureSeed);
     repo.upsertBudgetLine = async () => { throw new Error('Notion 502'); };
@@ -59,6 +78,14 @@ describe('deleteBudgetLineWith', () => {
     expect(await deleteBudgetLineWith(repo, 'b-courses')).toEqual({ ok: true });
     expect((await repo.listBudget()).some((l) => l.id === 'b-courses')).toBe(false);
     expect(revalidateTag).toHaveBeenCalledWith('notion');
+  });
+
+  it("refuse un id qui n'appartient pas au budget, sans rien supprimer", async () => {
+    const repo = new FakeRepo(fixtureSeed);
+    const del = vi.spyOn(repo, 'deleteBudgetLine');
+    expect(await deleteBudgetLineWith(repo, 'asset-hsbc')).toEqual({ ok: false, error: 'Ligne introuvable' });
+    expect(del).not.toHaveBeenCalled();
+    expect(revalidateTag).not.toHaveBeenCalled();
   });
 
   it('renvoie une erreur si le dépôt échoue', async () => {

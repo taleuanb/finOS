@@ -43,7 +43,7 @@ export async function exportSankeyPng(container: HTMLElement | null, filename = 
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(href);
+    setTimeout(() => URL.revokeObjectURL(href), 1000);
     return true;
   } catch {
     return false;

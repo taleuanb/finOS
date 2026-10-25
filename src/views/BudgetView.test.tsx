@@ -94,6 +94,37 @@ describe('BudgetView — résumé', () => {
   });
 });
 
+describe('BudgetView — Sankey', () => {
+  const orphans = (d: SankeyData) => d.nodes.filter((_, i) => !d.links.some((l) => l.source === i || l.target === i));
+
+  it('sans ligne : message à la place du graphique', () => {
+    setup({}, { ...fixtureDashboard, budget: { ...fixtureDashboard.budget, lines: [] } });
+    expect(screen.getByText(/Ajoute des revenus et des dépenses/)).toBeInTheDocument();
+    expect(screen.queryByTestId('sankey')).not.toBeInTheDocument();
+  });
+
+  it('déficit : phrase dédiée et aucun nœud orphelin', async () => {
+    const { user } = setup();
+    await setAmount(user, 'Loyer', '5000');
+    expect(screen.getByText(/Tes dépenses dépassent tes revenus de/)).toBeInTheDocument();
+    expect(screen.getByTestId('sankey')).toBeInTheDocument();
+    const names = lastSankey!.nodes.map((n) => n.name);
+    expect(names).not.toContain('Investissements');
+    expect(names).not.toContain('Épargne libre');
+    expect(orphans(lastSankey!)).toEqual([]);
+    for (const l of lastSankey!.links) {
+      expect(lastSankey!.nodes[l.source]).toBeDefined();
+      expect(lastSankey!.nodes[l.target]).toBeDefined();
+    }
+  });
+
+  it('investissement nul : pas de nœud Investissements', () => {
+    setup({}, { ...fixtureDashboard, strategy: { ...fixtureDashboard.strategy, monthlyInvest: 0 } });
+    expect(lastSankey!.nodes.map((n) => n.name)).not.toContain('Investissements');
+    expect(orphans(lastSankey!)).toEqual([]);
+  });
+});
+
 describe('BudgetView — validation', () => {
   // le résumé garde la dernière valeur valide saisie (« 12x » : 12 était valide avant le « x »)
   it.each([['-5', '1 845 €'], ['abc', '1 845 €'], ['12x', '1 457 €']])('refuse « %s » avec « Montant invalide » sans enregistrer', async (bad, expenses) => {

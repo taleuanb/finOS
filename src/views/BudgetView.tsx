@@ -7,7 +7,7 @@ import { toEur } from '@/domain/money';
 import type { BudgetLine, Currency } from '@/domain/types';
 import type { Dashboard } from '@/lib/dashboard';
 import { Card } from '@/ui/Card';
-import { SankeyChart } from '@/ui/charts/SankeyChart';
+import { SankeyChart, type SankeyData } from '@/ui/charts/SankeyChart';
 import { formatDateFr } from '@/ui/charts/shared';
 import { useDisplay } from '@/ui/display';
 import { Money } from '@/ui/Money';
@@ -55,6 +55,18 @@ export function parseAmount(text: string): number | null {
   if (!/^\d+([.,]\d+)?$/.test(t)) return null;
   const n = Number(t.replace(',', '.'));
   return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/** Retire les nœuds sans flux (déficit, investissement nul…) et réindexe les liens. */
+function pruneSankey(d: SankeyData): SankeyData {
+  const used = new Set(d.links.flatMap((l) => [l.source, l.target]));
+  const remap = new Map<number, number>();
+  const nodes = d.nodes.filter((_, i) => {
+    if (!used.has(i)) return false;
+    remap.set(i, remap.size);
+    return true;
+  });
+  return { nodes, links: d.links.map((l) => ({ ...l, source: remap.get(l.source)!, target: remap.get(l.target)! })) };
 }
 
 const toRow = (l: BudgetLine): Row => ({
@@ -124,7 +136,7 @@ export function BudgetView({ data, actions }: { data: Dashboard; actions: Budget
         monthlyAmount: r.monthlyAmount, currency: r.currency, order: r.order,
       }));
     const s = summarizeBudget(lines, data.fx, data.strategy.monthlyInvest);
-    return { summary: s, sankey: budgetSankey(lines, s, data.fx) };
+    return { summary: s, sankey: pruneSankey(budgetSankey(lines, s, data.fx)) };
   }, [rows, data.fx, data.strategy.monthlyInvest]);
 
   // --- Enregistrement ---

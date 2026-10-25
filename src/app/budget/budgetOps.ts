@@ -12,16 +12,20 @@ export type SaveResult = { ok: true; id: string } | { ok: false; error: string }
 
 export type BudgetLineInput = Omit<BudgetLine, 'id'> & { id?: string };
 
+const MAX_TEXT = 200;
+const MAX_AMOUNT = 10_000_000;
+const NOT_FOUND = 'Ligne introuvable';
+
 const CURRENCIES: readonly Currency[] = ['EUR', 'MAD', 'USD'];
 
 function parseLine(input: unknown): { ok: true; line: BudgetLineInput } | { ok: false; error: string } {
   const l = (input ?? {}) as Record<string, unknown>;
   const name = typeof l.name === 'string' ? l.name.trim() : '';
   const category = typeof l.category === 'string' ? l.category.trim() : '';
-  if (!name) return { ok: false, error: 'Nom requis' };
-  if (!category) return { ok: false, error: 'Catégorie requise' };
+  if (!name || name.length > MAX_TEXT) return { ok: false, error: 'Nom requis' };
+  if (!category || category.length > MAX_TEXT) return { ok: false, error: 'Catégorie requise' };
   if (l.section !== 'revenu' && l.section !== 'depense') return { ok: false, error: 'Section invalide' };
-  if (typeof l.monthlyAmount !== 'number' || !Number.isFinite(l.monthlyAmount) || l.monthlyAmount < 0) {
+  if (typeof l.monthlyAmount !== 'number' || !Number.isFinite(l.monthlyAmount) || l.monthlyAmount < 0 || l.monthlyAmount > MAX_AMOUNT) {
     return { ok: false, error: 'Montant invalide' };
   }
   if (!CURRENCIES.includes(l.currency as Currency)) return { ok: false, error: 'Devise invalide' };
@@ -36,25 +40,34 @@ function parseLine(input: unknown): { ok: true; line: BudgetLineInput } | { ok: 
   };
 }
 
+async function isBudgetLine(repo: Repo, id: string): Promise<boolean> {
+  return (await repo.listBudget()).some((l) => l.id === id);
+}
+
 export async function saveBudgetLineWith(repo: Repo, input: unknown): Promise<SaveResult> {
   const parsed = parseLine(input);
   if (!parsed.ok) return parsed;
   try {
+    // L'id vient du client : il doit désigner une ligne de la base Budget, jamais une autre page Notion.
+    if (parsed.line.id && !(await isBudgetLine(repo, parsed.line.id))) return { ok: false, error: NOT_FOUND };
     const id = await repo.upsertBudgetLine(parsed.line);
     revalidateTag('notion');
     return { ok: true, id };
-  } catch {
+  } catch (e) {
+    console.error('saveBudgetLine', e);
     return { ok: false, error: "Enregistrement impossible, réessaie dans un instant." };
   }
 }
 
 export async function deleteBudgetLineWith(repo: Repo, id: unknown): Promise<ActionResult> {
-  if (typeof id !== 'string' || !id) return { ok: false, error: 'Ligne introuvable' };
+  if (typeof id !== 'string' || !id) return { ok: false, error: NOT_FOUND };
   try {
+    if (!(await isBudgetLine(repo, id))) return { ok: false, error: NOT_FOUND };
     await repo.deleteBudgetLine(id);
     revalidateTag('notion');
     return { ok: true };
-  } catch {
+  } catch (e) {
+    console.error('deleteBudgetLine', e);
     return { ok: false, error: 'Suppression impossible, réessaie dans un instant.' };
   }
 }
@@ -73,7 +86,8 @@ export async function reorderBudgetWith(repo: Repo, ids: unknown): Promise<Actio
     }
     revalidateTag('notion');
     return { ok: true };
-  } catch {
+  } catch (e) {
+    console.error('reorderBudget', e);
     return { ok: false, error: "Réorganisation impossible, réessaie dans un instant." };
   }
 }

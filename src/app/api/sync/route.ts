@@ -7,6 +7,8 @@ import { createYahooProvider } from '@/prices/yahoo';
 import { runSync } from '@/sync/run';
 
 export const dynamic = 'force-dynamic';
+/** Vercel Hobby : jusqu'à 60 s (au lieu de 10 s par défaut) pour les cours et les écritures Notion. */
+export const maxDuration = 60;
 
 /** Synchronisation quotidienne. L'authentification (session ou Bearer CRON_SECRET) est faite par le middleware. */
 async function handle(): Promise<Response> {

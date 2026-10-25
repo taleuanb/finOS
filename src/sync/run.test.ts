@@ -261,4 +261,55 @@ describe('runSync', () => {
     const d = buildDashboard({ assets, movements, debts, budget, strategy, plan, snapshots, series: null, now: NOW });
     expect(d.plan.savings.balanceEur).toBeCloseTo(assets.find((a) => a.id === 'epargne')!.valueEur!, 9);
   });
+
+  it('I8 : taux de change et cours sont demandés en parallèle', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const slowFx: FxProvider = { async getRates() { await gate; return FX; } };
+    const { yahoo, crypto, deps } = setup({ fx: slowFx });
+    const p = runSync(deps);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(yahoo.quoteCalls.length).toBe(1); // demandé avant que les taux ne répondent
+    expect(crypto.calls.length).toBe(1);
+    release();
+    expect((await p).errors).toEqual([]);
+  });
+
+  it('I8 : les écritures des actifs se font à 3 en parallèle au plus', async () => {
+    let inFlight = 0;
+    let max = 0;
+    class SlowRepo extends FakeRepo {
+      override async updateAssetValuation(id: string, patch: Parameters<FakeRepo['updateAssetValuation']>[1]) {
+        inFlight++;
+        max = Math.max(max, inFlight);
+        await new Promise((r) => setTimeout(r, 5));
+        inFlight--;
+        return super.updateAssetValuation(id, patch);
+      }
+    }
+    const repo = new SlowRepo(fixtureSeed);
+    const report = await runSync(setup({ repo }).deps);
+    expect(report.errors).toEqual([]);
+    expect(max).toBe(3);
+    expect(report.updated).toBe(fixtureSeed.assets.length);
+  });
+
+  it('M5 : le spot de l’argent est pris sur SI=F pour l’actif argent de la Stratégie, quel que soit son identifiant', async () => {
+    const seed = structuredClone(fixtureSeed);
+    seed.assets.find((a) => a.id === 'ag')!.quoteId = 'SI=F';
+    const repo = new FakeRepo(seed);
+    const { yahoo, deps } = setup({ repo, yahoo: fakeYahoo({ quotes: { 'SI=F': q('SI=F', 32, 'USD') } }) });
+    await runSync(deps);
+    expect(yahoo.closeCalls).toContainEqual(['SI=F', '2025-03-19']);
+    const movs = new Map((await repo.listMovements()).map((m) => [m.id, m]));
+    expect(movs.get('mv-ag-1')!.spotEurPerKg).toBeCloseTo((25 / OZ_G) * 1000 / 1.25, 6);
+
+    const noId = structuredClone(fixtureSeed);
+    delete noId.assets.find((a) => a.id === 'ag')!.quoteId;
+    const repo2 = new FakeRepo(noId);
+    await runSync(setup({ repo: repo2 }).deps);
+    const movs2 = new Map((await repo2.listMovements()).map((m) => [m.id, m]));
+    expect(movs2.get('mv-ag-4')!.spotEurPerKg).toBeCloseTo((25 / OZ_G) * 1000 / 1.25, 6);
+  });
 });
+

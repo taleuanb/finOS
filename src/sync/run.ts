@@ -21,6 +21,8 @@ export interface SyncReport {
 const TIMEOUT_MS = 8_000;
 const METALS = 'Métaux précieux';
 const SPOT_PARALLEL = 4;
+const WRITE_PARALLEL = 3;
+const SILVER_QUOTES = new Set(['XAG', 'SI=F']);
 
 const asError = (e: unknown): Error => (e instanceof Error ? e : new Error(String(e)));
 const warn = (e: unknown): string => `⚠ ${asError(e).message}`;
@@ -77,30 +79,32 @@ export async function runSync(d: {
   const active = withPositions(allAssets.filter((a) => !a.archived), movements);
   const lastSnapshot = [...snapshots].sort((a, b) => a.date.localeCompare(b.date)).at(-1);
 
-  // Taux de change : à défaut, ceux du dernier instantané.
-  let fx: FxRates;
-  let valuationIncomplete = false;
-  try {
-    fx = await withTimeout(() => d.fx.getRates(), 'taux de change');
-  } catch (e) {
-    valuationIncomplete = true;
-    errors.push({ assetId: 'fx', message: asError(e).message });
-    if (!lastSnapshot) return { date, updated: 0, errors, partial: true };
-    // GBP n'est pas conservé dans l'instantané : les cotations en GBP échoueront (valeur non finie).
-    fx = { date, EUR: 1, MAD: lastSnapshot.eurMad, USD: lastSnapshot.eurUsd, GBP: Number.NaN };
-  }
-
-  // Cours en lot, une source après l'autre indépendante des autres.
+  // Taux de change et cours en parallèle, chaque source indépendante des autres.
   const savingsId = strategy.savingsAssetId;
   const autos = active.filter((a) => a.mode === 'auto' && a.id !== savingsId);
   const cryptoIds = new Set(autos.filter((a) => a.assetClass === 'Crypto' && a.quoteId).map((a) => a.quoteId!));
   const yahooIds = new Set(autos.filter((a) => a.assetClass !== 'Crypto' && a.quoteId).map((a) => a.quoteId!));
   yahooIds.add('XAU');
   yahooIds.add('XAG');
-  const [cryptoQuotes, yahooQuotes] = await Promise.all([
+  const [fxResult, cryptoQuotes, yahooQuotes] = await Promise.all([
+    withTimeout(() => d.fx.getRates(), 'taux de change').then((r) => r, (e: unknown) => asError(e)),
     fetchQuotes(crypto, [...cryptoIds], 'CoinGecko'),
     fetchQuotes(yahoo, [...yahooIds], 'Yahoo'),
   ]);
+
+  // Taux de change : à défaut, ceux du dernier instantané.
+  let fx: FxRates;
+  let valuationIncomplete = false;
+  if (fxResult instanceof Error) {
+    valuationIncomplete = true;
+    errors.push({ assetId: 'fx', message: fxResult.message });
+    if (!lastSnapshot) return { date, updated: 0, errors, partial: true };
+    // GBP n'est pas conservé dans l'instantané : les cotations en GBP échoueront (valeur non finie).
+    fx = { date, EUR: 1, MAD: lastSnapshot.eurMad, USD: lastSnapshot.eurUsd, GBP: Number.NaN };
+  } else {
+    fx = fxResult;
+  }
+
   const quoteOf = (a: Asset): Quote | Error => {
     if (!a.quoteId) return new Error('identifiant de cotation manquant');
     const src = a.assetClass === 'Crypto' ? cryptoQuotes : yahooQuotes;
@@ -136,8 +140,8 @@ export async function runSync(d: {
     }
   };
 
-  for (const a of active) {
-    if (a.id === savingsId) continue;
+  // Écritures à 3 en parallèle au plus ; le limiteur Notion partagé garde 3 requêtes/s.
+  await mapLimit(active.filter((a) => a.id !== savingsId), WRITE_PARALLEL, async (a) => {
     if (a.mode === 'manual') {
       await write(a, () => valueAsset(a, undefined, fx));
     } else {
@@ -147,7 +151,7 @@ export async function runSync(d: {
         return valueAsset(a, quote, fx);
       });
     }
-  }
+  });
 
   // Épargne : dernière saisie manuelle + épargne mensuelle − achats du plan (même calcul que le tableau de bord).
   const savings = savingsId ? active.find((a) => a.id === savingsId) : undefined;
@@ -169,7 +173,9 @@ export async function runSync(d: {
   };
   const backfill = async (m: Movement) => {
     try {
-      const symbol = metalIds.get(m.assetId)!.quoteId === 'XAG' ? 'SI=F' : 'GC=F';
+      const asset = metalIds.get(m.assetId)!;
+      const isSilver = asset.id === strategy.silverAssetId || SILVER_QUOTES.has(asset.quoteId ?? '');
+      const symbol = isSilver ? 'SI=F' : 'GC=F';
       const [usdPerOz, eurUsd] = await Promise.all([closeOn(symbol, m.date), closeOn('EURUSD=X', m.date)]);
       await repo.setMovementSpot(m.id, (usdPerOz / OZ_G) * 1000 / eurUsd);
     } catch (e) {

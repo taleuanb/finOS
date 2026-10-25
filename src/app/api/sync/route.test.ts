@@ -9,7 +9,7 @@ vi.mock('@/prices/yahoo', () => ({ createYahooProvider: () => ({ yahoo: true }) 
 vi.mock('@/prices/coingecko', () => ({ createCoinGeckoProvider: () => ({ crypto: true }) }));
 vi.mock('@/prices/fx', () => ({ createFxProvider: () => ({ fx: true }) }));
 
-import { GET, POST, dynamic } from './route';
+import { GET, POST, dynamic, maxDuration } from './route';
 
 const report = { date: '2026-10-27', updated: 18, errors: [{ assetId: 'hsbc', message: 'x' }], partial: true };
 
@@ -21,6 +21,10 @@ beforeEach(() => {
 describe('/api/sync', () => {
   it('est dynamique', () => {
     expect(dynamic).toBe('force-dynamic');
+  });
+
+  it('dispose de 60 s (Vercel Hobby) pour la synchro', () => {
+    expect(maxDuration).toBe(60);
   });
 
   it.each([['GET', GET], ['POST', POST]] as const)('%s : lance la synchro, vide le cache et renvoie le rapport (200 même partiel)', async (_m, handler) => {

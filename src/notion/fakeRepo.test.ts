@@ -77,6 +77,13 @@ describe('FakeRepo', () => {
       expect(a.fixedMonthly).toBe(50); // absent du patch = inchangé
       expect(a.name).toBe('Livret');
     });
+    it('updateAsset : unitPrice null vide le cours unitaire', async () => {
+      const r = new FakeRepo(fixtureSeed);
+      await r.updateAsset('etf-revolut', { quoteId: 'VWCE.DE', unitPrice: null });
+      const a = (await r.listAssets()).find((x) => x.id === 'etf-revolut')!;
+      expect(a.quoteId).toBe('VWCE.DE');
+      expect('unitPrice' in a).toBe(false);
+    });
     it("updateAsset : undefined = inchangé, null sur champ obligatoire ignoré, id inconnu rejeté", async () => {
       const r = new FakeRepo(fixtureSeed);
       const id = await r.createAsset(input);

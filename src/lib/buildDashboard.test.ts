@@ -436,12 +436,17 @@ describe('buildDashboard : crédits', () => {
 });
 
 describe('buildDashboard : versement fixe en devise', () => {
-  it('la proposition convertit le versement fixe d’un actif en MAD', () => {
+  it('la proposition convertit le versement fixe d’un actif en MAD : 1 085 MAD = 100 € exactement', () => {
     const assets = fixtureSeed.assets.map((a) => (a.id === 'per' ? { ...a, currency: 'MAD' as const, fixedMonthly: 1_085 } : a));
-    const d = buildDashboard(input({ assets, plan: planWithoutNovember }));
-    const per = d.plan.proposal!.find((l) => l.assetId === 'per')!;
-    expect(per.origin).toBe('fixe');
-    expect(per.amount).toBeGreaterThanOrEqual(100);
-    expect(per.amount).toBeLessThan(1_085);
+    // Sans cible PER, la ligne du PER ne contient que le versement fixe (taux du dernier instantané : 10,85).
+    const targets = { ...fixtureSeed.strategy.targets };
+    const mainAssetByClass = { ...fixtureSeed.strategy.mainAssetByClass };
+    delete targets.PER;
+    delete mainAssetByClass.PER;
+    const strategy = { ...fixtureSeed.strategy, targets, mainAssetByClass };
+    const d = buildDashboard(input({ assets, strategy, plan: planWithoutNovember }));
+    expect(d.plan.proposal!.find((l) => l.assetId === 'per')).toEqual({
+      assetId: 'per', amount: 100, origin: 'fixe', reason: 'Versement fixe programmé',
+    });
   });
 });

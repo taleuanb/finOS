@@ -11,7 +11,7 @@ import { AllocationError } from '@/domain/types';
 import type {
   Asset, AssetClass, BudgetLine, Debt, FxRates, Movement, PlanLine, Snapshot, Strategy,
 } from '@/domain/types';
-import { gain, valueAsset } from '@/domain/valuation';
+import { gain, knownUnitPrice, valueAsset } from '@/domain/valuation';
 import { gridIssue, zoneFor } from '@/domain/zones';
 import type {
   Dashboard, MetalPosition, MetalPurchaseView, Period, PlanLineView, ValuedAsset,
@@ -79,7 +79,7 @@ function valueAssets(
     if (savings && a.id === savings.id) {
       valueEur = savings.valueEur;
       value = fromEur(valueEur, a.currency, fx);
-    } else if (a.mode === 'manual' || a.unitPrice !== undefined) {
+    } else if (a.mode === 'manual' || knownUnitPrice(a) !== undefined) {
       // Auto avec un cours connu : quantité des mouvements × dernier cours, comme la synchro (un mouvement
       // ajouté depuis la dernière synchro compte aussitôt).
       ({ value, valueEur } = valueAsset(a, undefined, fx));

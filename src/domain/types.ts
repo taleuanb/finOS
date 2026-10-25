@@ -47,6 +47,12 @@ export interface AssetInput {
   fixedMonthly?: number; archived?: boolean;
 }
 
+/**
+ * Modification d'un actif : `null` efface un champ optionnel. `unitPrice: null` vide « Cours unitaire » (écrit par la
+ * synchro, jamais saisi) quand la classe, la cotation ou le mode change : l'ancien cours serait lu dans une autre unité.
+ */
+export type AssetUpdate = { [K in keyof AssetInput]?: AssetInput[K] | null } & { unitPrice?: null };
+
 /** Saisie d'un crédit depuis l'app (la valeur € est calculée ailleurs). */
 export interface DebtInput {
   name: string; type?: string; currency: Currency; outstanding: number;

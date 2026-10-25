@@ -153,11 +153,12 @@ export type Patch<T> = { [K in keyof T]?: T[K] | null };
 
 /**
  * Propriétés d'entrée d'un actif saisies dans l'app (création ou patch). N'écrit que les clés présentes ;
- * jamais Quantité / Prix de revient (rollups), Plus-value / % (formules) ni les champs « script ».
+ * jamais Quantité / Prix de revient (rollups), Plus-value / % (formules) ni les champs « script » (sauf pour vider
+ * « Cours unitaire » : `unitPrice: null`).
  * `null` vide un champ optionnel ; sur un champ obligatoire (nom, classe, devise, mode) il est ignoré.
  * Types alignés sur la base créée par `setup.ts` : Sous-type en texte, Établissement en select.
  */
-export function assetInputToProperties(a: Patch<AssetInput>): NotionProps {
+export function assetInputToProperties(a: Patch<AssetInput> & { unitPrice?: null }): NotionProps {
   const p = P.assets;
   const props: NotionProps = {};
   if (a.name != null) props[p.name] = w.title(a.name);
@@ -171,6 +172,7 @@ export function assetInputToProperties(a: Patch<AssetInput>): NotionProps {
   if (a.manualValueDate !== undefined) props[p.manualValueDate] = w.date(a.manualValueDate ?? undefined);
   if (a.fixedMonthly !== undefined) props[p.fixedMonthly] = w.num(a.fixedMonthly);
   if (a.archived !== undefined) props[p.archived] = w.chk(a.archived === true);
+  if (a.unitPrice === null) props[p.unitPrice] = w.num(null); // vidé seulement (classe / cotation / mode changés)
   return props;
 }
 

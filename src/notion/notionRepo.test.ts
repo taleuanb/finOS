@@ -167,6 +167,13 @@ describe('écriture : actifs, crédits, Stratégie', () => {
       'Valeur manuelle': { number: 5 }, 'Établissement': { select: null }, 'Archivé': { checkbox: true },
     } }]);
   });
+  it('updateAsset peut vider « Cours unitaire » (unitPrice: null), dans la même écriture', async () => {
+    const { client, updates } = fakeClient();
+    await createNotionRepo(client, ids).updateAsset('a1', { assetClass: 'Fonds & ETF', unitPrice: null });
+    expect(updates).toEqual([{ page_id: 'a1', properties: {
+      'Classe': { select: { name: 'Fonds & ETF' } }, 'Cours unitaire': { number: null },
+    } }]);
+  });
   it('createDebt / updateDebt écrivent dans Dettes ; deleteDebt met en corbeille', async () => {
     const { client, creates, updates } = fakeClient();
     const repo = createNotionRepo(client, ids);

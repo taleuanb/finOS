@@ -1,5 +1,5 @@
 import type {
-  Asset, AssetInput, BudgetLine, Debt, DebtInput, Movement, PlanLine, Snapshot, Strategy, StrategyEntryInput,
+  Asset, AssetInput, AssetUpdate, BudgetLine, Debt, DebtInput, Movement, PlanLine, Snapshot, Strategy, StrategyEntryInput,
 } from '@/domain/types';
 import { strategyFromRows, strategyToRows, type StrategyRow } from './mappers';
 import type { Repo } from './repo';
@@ -121,7 +121,7 @@ export class FakeRepo implements Repo {
     return id;
   }
 
-  async updateAsset(id: string, patch: Patch<AssetInput>) {
+  async updateAsset(id: string, patch: AssetUpdate) {
     const a = this.assets.find((x) => x.id === id);
     if (!a) throw new Error(`Actif introuvable : ${id}`);
     const { archived, ...rest } = patch;

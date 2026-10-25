@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { buildDashboard } from '@/lib/buildDashboard';
 import { FakeRepo, fixtureSeed } from '@/notion/fakeRepo';
 import {
   addMovementWith, archiveAssetWith, createAssetWith, createDebtWith, deleteDebtWith, updateAssetWith, updateDebtWith,
@@ -189,6 +190,61 @@ describe('updateAssetWith', () => {
   it('un actif utilisé par la Stratégie reste modifiable sans changer de classe (classe identique comprise)', async () => {
     expect(await updateAssetWith(repo, 'hsbc', { name: 'HSBC Global', assetClass: 'Fonds & ETF' }, NOW)).toEqual({ ok: true });
     expect((await repo.listAssets()).find((a) => a.id === 'hsbc')).toMatchObject({ name: 'HSBC Global', assetClass: 'Fonds & ETF' });
+  });
+
+  describe('cours unitaire après un changement de classe, de cotation ou de mode', () => {
+    const metal = {
+      id: 'or-libre', name: 'Or libre', assetClass: 'Métaux précieux' as const, currency: 'EUR' as const, mode: 'auto' as const,
+      quoteId: 'XAU', quantity: 0, costBasis: 0, unitPrice: 120_000, value: 1_200, valueEur: 1_200, archived: false,
+      syncStatus: 'OK', lastUpdate: '2026-11-05T05:00:00Z',
+    };
+    const buy = { id: 'mv-or-libre', label: 'Achat', date: '2026-11-01', assetId: 'or-libre', kind: 'buy' as const, quantity: 10, amount: 1_100 };
+    const withMetal = () => new FakeRepo({ ...structuredClone(fixtureSeed), assets: [...structuredClone(fixtureSeed.assets), metal], movements: [...fixtureSeed.movements, buy] });
+    const dash = async (r: FakeRepo) => {
+      const [assets, movements, debts, budget, strategy, plan, snapshots] = await Promise.all([
+        r.listAssets(), r.listMovements(), r.listDebts(), r.listBudget(), r.getStrategy(), r.listPlan(), r.listSnapshots(),
+      ]);
+      return buildDashboard({ assets, movements, debts, budget, strategy, plan, snapshots, series: null, now: NOW });
+    };
+    const priceOf = async (r: FakeRepo, id: string) => (await r.listAssets()).find((a) => a.id === id)!.unitPrice;
+
+    it('métal → ETF : le cours €/kg est vidé (même écriture), la valeur stockée est gardée (pas ×1000)', async () => {
+      const r = withMetal();
+      expect((await dash(r)).assets.find((a) => a.id === 'or-libre')!.valueEur).toBeCloseTo(1_200, 6);
+      const spy = vi.spyOn(r, 'updateAsset');
+      expect(await updateAssetWith(r, 'or-libre', { assetClass: 'Fonds & ETF', quoteId: 'IWDA.AS' }, NOW)).toEqual({ ok: true });
+      expect(spy).toHaveBeenCalledWith('or-libre', { assetClass: 'Fonds & ETF', quoteId: 'IWDA.AS', unitPrice: null });
+      expect(await priceOf(r, 'or-libre')).toBeUndefined();
+      const a = (await dash(r)).assets.find((x) => x.id === 'or-libre')!;
+      expect(a.value).toBe(1_200);
+      expect(a.valueEur).toBe(1_200);
+    });
+
+    it('ETF → métal : le cours par part est vidé, la valeur stockée est gardée (pas ÷1000)', async () => {
+      const r = new FakeRepo(structuredClone(fixtureSeed));
+      expect(await updateAssetWith(r, 'etf-revolut', { assetClass: 'Métaux précieux', quoteId: 'XAU' }, NOW)).toEqual({ ok: true });
+      expect(await priceOf(r, 'etf-revolut')).toBeUndefined();
+      const a = (await dash(r)).assets.find((x) => x.id === 'etf-revolut')!;
+      expect(a.valueEur).toBe(16_310);
+    });
+
+    it('changer seulement la cotation ou le mode vide aussi le cours', async () => {
+      const r = new FakeRepo(structuredClone(fixtureSeed));
+      expect(await updateAssetWith(r, 'etf-revolut', { quoteId: 'VWCE.DE' }, NOW)).toEqual({ ok: true });
+      expect(await priceOf(r, 'etf-revolut')).toBeUndefined();
+      const r2 = new FakeRepo(structuredClone(fixtureSeed));
+      expect(await updateAssetWith(r2, 'etf-revolut', { mode: 'manual', manualValue: 16_000 }, NOW)).toEqual({ ok: true });
+      expect(await priceOf(r2, 'etf-revolut')).toBeUndefined();
+    });
+
+    it('même classe, même cotation (renommage, valeurs identiques renvoyées) : le cours est gardé', async () => {
+      const r = withMetal();
+      const spy = vi.spyOn(r, 'updateAsset');
+      expect(await updateAssetWith(r, 'or-libre', { name: 'Or (coffre)', assetClass: 'Métaux précieux', quoteId: 'xau', mode: 'auto' }, NOW)).toEqual({ ok: true });
+      expect(spy.mock.calls[0][1]).not.toHaveProperty('unitPrice');
+      expect(await priceOf(r, 'or-libre')).toBe(120_000);
+      expect((await dash(r)).assets.find((a) => a.id === 'or-libre')!.valueEur).toBeCloseTo(1_200, 6);
+    });
   });
 
   it('un actif hors Stratégie peut changer de classe', async () => {

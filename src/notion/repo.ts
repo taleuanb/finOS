@@ -1,5 +1,5 @@
 import type {
-  Asset, AssetInput, BudgetLine, Debt, DebtInput, Movement, PlanLine, Snapshot, Strategy, StrategyEntryInput,
+  Asset, AssetInput, AssetUpdate, BudgetLine, Debt, DebtInput, Movement, PlanLine, Snapshot, Strategy, StrategyEntryInput,
 } from '@/domain/types';
 
 /** Accès aux données (Notion en production, FakeRepo en test). */
@@ -19,8 +19,8 @@ export interface Repo {
   deleteBudgetLine(id: string): Promise<void>;
   createPlanLines(lines: PlanLine[]): Promise<void>;
   createAsset(a: AssetInput): Promise<string>;
-  /** N'écrit que les clés présentes ; `null` efface un champ optionnel. */
-  updateAsset(id: string, patch: { [K in keyof AssetInput]?: AssetInput[K] | null }): Promise<void>;
+  /** N'écrit que les clés présentes ; `null` efface un champ optionnel (`unitPrice: null` vide le cours unitaire). */
+  updateAsset(id: string, patch: AssetUpdate): Promise<void>;
   createDebt(d: DebtInput): Promise<string>;
   updateDebt(id: string, patch: { [K in keyof DebtInput]?: DebtInput[K] | null }): Promise<void>;
   deleteDebt(id: string): Promise<void>;                  // corbeille Notion

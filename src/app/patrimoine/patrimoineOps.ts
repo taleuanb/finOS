@@ -1,5 +1,5 @@
 import { parisDate } from '@/domain/dates';
-import { ASSET_CLASSES, type AssetInput, type Currency, type DebtInput } from '@/domain/types';
+import { ASSET_CLASSES, type AssetInput, type AssetUpdate, type Currency, type DebtInput } from '@/domain/types';
 import type { Repo } from '@/notion/repo';
 
 /**
@@ -225,7 +225,12 @@ export async function updateAssetWith(repo: Repo, id: unknown, patch: unknown, n
     // On n'écrit que les clés de saisie fournies, avec leur valeur normalisée (jamais un champ inconnu).
     const write: Record<string, unknown> = {};
     for (const k of written) write[k] = parsed.value[k as keyof AssetInput] ?? null;
-    if (Object.keys(write).length > 0) await repo.updateAsset(id, write as AssetPatch);
+    // Classe, cotation ou mode changés : le dernier cours (€/kg pour un métal, devise de l'actif par unité sinon)
+    // serait lu dans une autre unité (valeur ×1000 ou ÷1000) ; il est vidé dans la même écriture, la synchro le réécrira.
+    const next = parsed.value;
+    const repriced = next.assetClass !== existing.assetClass || next.mode !== existing.mode || next.quoteId !== existing.quoteId;
+    if (repriced && existing.unitPrice !== undefined) write.unitPrice = null;
+    if (Object.keys(write).length > 0) await repo.updateAsset(id, write as AssetUpdate);
     return { ok: true };
   } catch (e) {
     console.error('updateAsset', e);

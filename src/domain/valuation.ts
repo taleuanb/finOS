@@ -19,6 +19,11 @@ export function valueAtUnitPrice(a: Asset, unitPrice: number, fx: FxRates): Valu
   return { unitPrice, value, valueEur: toEur(value, a.currency, fx) };
 }
 
+/** Dernier cours unitaire utilisable (un cours vidé ou illisible compte comme absent). */
+export function knownUnitPrice(a: Pick<Asset, 'unitPrice'>): number | undefined {
+  return typeof a.unitPrice === 'number' && Number.isFinite(a.unitPrice) ? a.unitPrice : undefined;
+}
+
 /**
  * Valorise un actif. `value` est dans la devise de l'actif, `valueEur` en euros.
  * - manuel : `manualValue` ;
@@ -33,7 +38,8 @@ export function valueAsset(a: Asset, quote: Quote | undefined, fx: FxRates): Val
     return { value, valueEur: toEur(value, a.currency, fx) };
   }
   if (!quote) {
-    if (a.unitPrice !== undefined) return valueAtUnitPrice(a, a.unitPrice, fx);
+    const last = knownUnitPrice(a);
+    if (last !== undefined) return valueAtUnitPrice(a, last, fx);
     const value = a.value ?? 0;
     return { value, valueEur: toEur(value, a.currency, fx) };
   }

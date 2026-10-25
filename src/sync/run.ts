@@ -111,7 +111,8 @@ export async function runSync(d: {
     return src.get(a.quoteId) ?? new Error(`cours absent : ${a.quoteId}`);
   };
 
-  // Valorisation de chaque actif, avec écriture isolée ; `current` reflète ce qui est réellement en base.
+  // Valorisation de chaque actif, avec écriture isolée ; `current` porte la valeur retenue pour l'instantané : le calcul
+  // du jour, ou le repli d'un actif en échec (même si l'écriture de ce repli dans Notion a elle-même échoué).
   const current = new Map(active.map((a) => [a.id, a]));
   let updated = 0;
 

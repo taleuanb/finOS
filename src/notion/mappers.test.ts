@@ -227,6 +227,10 @@ describe('assetInputToProperties', () => {
       expect(props).not.toHaveProperty(k);
     }
   });
+  it('unitPrice null vide « Cours unitaire » (jamais une valeur écrite depuis la saisie)', () => {
+    expect(assetInputToProperties({ unitPrice: null })).toEqual({ 'Cours unitaire': { number: null } });
+    expect(assetInputToProperties({ name: 'X' })).not.toHaveProperty('Cours unitaire');
+  });
   it('écrit chaque champ dans le type que lisent les mappers de lecture (aller-retour)', () => {
     const props = assetInputToProperties(full);
     expect(props['Sous-type']).toEqual({ rich_text: [{ text: { content: 'Livret A' } }] });

@@ -224,7 +224,9 @@ describe('buildDashboard : budget', () => {
 describe('buildDashboard : plan du mois', () => {
   it('mois non validé : proposition = allocate(budget.investEur)', () => {
     const d = buildDashboard(input({ plan: planWithoutNovember }));
-    expect(d.plan).toMatchObject({ month: '2026-11', validated: false, allocationError: null, lines: [] });
+    expect(d.plan).toMatchObject({ month: '2026-11', validated: false, allocationError: null });
+    // I4 : seuls les reliquats (plannedEur 0) figurent dans les lignes d'un mois non validé.
+    expect(d.plan.lines.every((l) => l.plannedEur === 0 && l.reason === 'Reliquat des mois précédents')).toBe(true);
     const expected = allocate({
       amount: d.budget.investEur,
       assets: d.assets,
@@ -327,3 +329,34 @@ describe('buildDashboard : fraîcheur des valeurs (I3) et positions (I12)', () =
   });
 });
 
+
+describe('buildDashboard : reliquats des mois précédents (I4)', () => {
+  // Syla : 600 € prévus de juin à novembre, jamais achetés. On retire Syla du plan de novembre.
+  const planNoSylaNov = fixtureSeed.plan.filter((l) => !(l.month === '2026-11' && l.assetId === 'syla'));
+
+  it('mois validé : un actif absent du mois mais avec un reste à investir a sa ligne, déclarable', () => {
+    const d = buildDashboard(input({ plan: planNoSylaNov }));
+    const syla = d.plan.lines.find((l) => l.assetId === 'syla');
+    expect(syla).toMatchObject({
+      assetName: 'Syla Invest', plannedEur: 0, toInvestEur: 500, status: 'pending', reason: 'Reliquat des mois précédents',
+    });
+    expect(d.plan.pendingEur).toBe(d.plan.savings.reservedEur);
+  });
+
+  it('mois non validé : proposition et reliquats affichés, En attente = Réservé', () => {
+    const d = buildDashboard(input({ plan: planWithoutNovember }));
+    expect(d.plan.validated).toBe(false);
+    expect(d.plan.proposal).not.toBeNull();
+    const byId = Object.fromEntries(d.plan.lines.map((l) => [l.assetId, l]));
+    expect(Object.keys(byId).sort()).toEqual(['ag', 'or', 'syla']); // or 165, argent 135, Syla 500 dus
+    expect(byId.syla).toMatchObject({ plannedEur: 0, toInvestEur: 500, status: 'pending', reason: 'Reliquat des mois précédents' });
+    expect(byId.or).toMatchObject({ toInvestEur: 165, status: 'pending' });
+    expect(d.plan.pendingEur).toBe(800);
+    expect(d.plan.pendingEur).toBe(d.plan.savings.reservedEur);
+  });
+
+  it('cas des maquettes : En attente = Réservé', () => {
+    const d = buildDashboard(input());
+    expect(d.plan.pendingEur).toBe(d.plan.savings.reservedEur);
+  });
+});

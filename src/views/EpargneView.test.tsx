@@ -485,6 +485,32 @@ describe('EpargneView — proposition non modifiée avec des centimes (I1)', () 
   });
 });
 
+describe('EpargneView — reliquats des mois précédents (I4)', () => {
+  const carried = {
+    assetId: 'syla', assetName: 'Syla Invest', plannedEur: 0, origin: 'cible' as const,
+    reason: 'Reliquat des mois précédents', toInvestEur: 500, monthsAccrued: 0, status: 'pending' as const,
+  };
+
+  it('mois non validé : la proposition ET les reliquats déclarables sont affichés', async () => {
+    const user = userEvent.setup();
+    renderView(unvalidated({ lines: [carried], pendingEur: 500 }));
+    expect(screen.getByRole('button', { name: 'Valider le plan' })).toBeInTheDocument();
+    const row = rowOf(/Syla Invest/);
+    expect(within(row).getByText('Reliquat des mois précédents')).toBeInTheDocument();
+    expect(within(row).queryByText(/Prévu/)).not.toBeInTheDocument();
+    await user.click(within(row).getByRole('button', { name: /Déclarer l'achat/ }));
+    expect(within(screen.getByRole('dialog')).getByLabelText(/Montant/)).toHaveValue('500');
+  });
+
+  it('mois validé : la ligne de reliquat a son bouton « Déclarer l’achat »', () => {
+    const data = { ...fixtureDashboard, plan: { ...fixtureDashboard.plan, lines: [...fixtureDashboard.plan.lines.filter((l) => l.assetId !== 'syla'), carried] } };
+    renderView(data);
+    const row = rowOf(/Syla Invest/);
+    expect(within(row).getByText('Reliquat des mois précédents')).toBeInTheDocument();
+    expect(within(row).getByRole('button', { name: /Déclarer l'achat/ })).toBeInTheDocument();
+  });
+});
+
 describe('MonthPill', () => {
   it('affiche le mois en français', () => {
     render(<MonthPill month="2026-11" />);

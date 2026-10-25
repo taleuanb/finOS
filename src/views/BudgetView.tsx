@@ -506,7 +506,8 @@ function InvestPanel({ data }: { data: Dashboard }) {
   let title = 'Plan du mois';
   let items: { key: string; label: string; eur: number }[] | null = null;
   if (plan.validated && plan.lines.length > 0) {
-    items = plan.lines.map((l) => ({ key: l.assetId, label: l.assetName, eur: l.plannedEur }));
+    // Les reliquats des mois précédents (prévu 0 €) ne font pas partie du plan du mois.
+    items = plan.lines.filter((l) => l.plannedEur > 0).map((l) => ({ key: l.assetId, label: l.assetName, eur: l.plannedEur }));
   } else if (plan.proposal) {
     title = 'Proposition du mois (non validée)';
     items = plan.proposal.map((l) => ({ key: l.assetId, label: name(l.assetId), eur: l.amount }));

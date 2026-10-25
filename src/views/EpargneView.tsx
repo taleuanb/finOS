@@ -252,7 +252,11 @@ function PlanRow({ line, asset, strategy, onDeclare }: {
         <Avatar name={line.assetName} bg={bg} fg={fg} />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span id={uid} className="text-[14px] font-bold">{line.assetName}</span>
-          <span className="text-xs text-muted">Prévu <Money eur={line.plannedEur} /> · {localizeReason(line.reason, d)}</span>
+          {line.plannedEur > 0 ? (
+            <span className="text-xs text-muted">Prévu <Money eur={line.plannedEur} /> · {localizeReason(line.reason, d)}</span>
+          ) : (
+            <span className="text-xs text-muted">{localizeReason(line.reason, d)}</span>
+          )}
         </div>
         {declared ? (
           <Badge tone="gain" className="whitespace-nowrap !px-2.5 !py-[5px] !text-xs">✓ Déclaré</Badge>
@@ -514,11 +518,23 @@ export function EpargneView({ data, validatePlan, declarePurchase }: EpargneView
 
       {!plan.validated && plan.proposal ? <Proposal key={plan.month} data={data} validatePlan={validatePlan} /> : null}
 
-      {plan.validated ? (
-        <section aria-label="Plan d'investissement" className="overflow-hidden rounded-[20px] border border-border bg-card">
+      {plan.validated || plan.lines.length > 0 ? (
+        <section
+          aria-label={plan.validated ? "Plan d'investissement" : 'Reliquats à investir'}
+          className="overflow-hidden rounded-[20px] border border-border bg-card"
+        >
           <div className="flex items-center justify-between px-4 pb-3 pt-4">
-            <h2 className="text-base font-bold">Plan d&apos;investissement · <Money eur={budget.investEur} /></h2>
-            <span className="text-xs text-muted">selon tes cibles</span>
+            {plan.validated ? (
+              <>
+                <h2 className="text-base font-bold">Plan d&apos;investissement · <Money eur={budget.investEur} /></h2>
+                <span className="text-xs text-muted">selon tes cibles</span>
+              </>
+            ) : (
+              <>
+                <h2 className="text-base font-bold">Reliquats à investir</h2>
+                <span className="text-xs text-muted">mois précédents</span>
+              </>
+            )}
           </div>
           <ul>
             {plan.lines.map((l) => (

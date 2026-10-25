@@ -38,6 +38,8 @@ const ORIGIN_REASON: Record<PlanLine['origin'], string> = {
   signal: 'Signal or / argent',
 };
 
+const CARRIED_REASON = 'Reliquat des mois précédents';
+
 const sum = (xs: number[]) => xs.reduce((s, x) => s + x, 0);
 
 /** Mois 'AAAA-MM' décalé de `delta` mois. */
@@ -226,12 +228,20 @@ export function buildDashboard(i: DashboardInput): Dashboard {
   }
 
   const toInvest = toInvestByAsset(plan, movements, i.assets, fx, month);
-  const lines: PlanLineView[] = monthLines.map((l) => ({
+  const lineView = (l: Pick<PlanLine, 'assetId' | 'amount' | 'origin'>, reason: string): PlanLineView => ({
     assetId: l.assetId, assetName: nameOf.get(l.assetId) ?? l.assetId, plannedEur: l.amount, origin: l.origin,
-    reason: ORIGIN_REASON[l.origin], toInvestEur: toInvest.get(l.assetId) ?? 0,
+    reason, toInvestEur: toInvest.get(l.assetId) ?? 0,
     monthsAccrued: monthsAccrued(toInvest.get(l.assetId) ?? 0, l.amount),
     status: monthStatus(l.assetId, month, plan, movements, i.assets, fx),
-  }));
+  });
+  // Lignes du mois, puis les reliquats : actifs absents du mois (validé ou non) qui ont encore un reste à investir.
+  const lines: PlanLineView[] = monthLines.map((l) => lineView(l, ORIGIN_REASON[l.origin]));
+  const inMonth = new Set(monthLines.map((l) => l.assetId));
+  for (const [assetId, rest] of toInvest) {
+    if (rest <= 0 || inMonth.has(assetId)) continue;
+    const last = plan.filter((l) => l.assetId === assetId && l.month < month).sort((a, b) => a.month.localeCompare(b.month)).at(-1);
+    lines.push(lineView({ assetId, amount: 0, origin: last?.origin ?? 'cible' }, CARRIED_REASON));
+  }
 
   const planAssetIds = new Set(plan.map((l) => l.assetId));
   const investedIn = (m: string) => sum(

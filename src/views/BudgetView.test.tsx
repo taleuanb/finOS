@@ -306,6 +306,18 @@ describe('BudgetView — catégories et onglets', () => {
     expect(screen.queryByRole('button', { name: /Ajouter/ })).not.toBeInTheDocument();
   });
 
+  it('Investissements : les reliquats (prévu 0 €) ne sont pas listés dans le plan du mois', async () => {
+    const carried = {
+      assetId: 'kunto', assetName: 'kunto', plannedEur: 0, origin: 'cible' as const,
+      reason: 'Reliquat des mois précédents', toInvestEur: 50, monthsAccrued: 0, status: 'pending' as const,
+    };
+    const data: Dashboard = { ...fixtureDashboard, plan: { ...fixtureDashboard.plan, lines: [...fixtureDashboard.plan.lines, carried] } };
+    const { user } = setup({}, data);
+    await user.click(screen.getByRole('tab', { name: 'Investissements' }));
+    expect(screen.getByText('HSBC Islamic Global Equity')).toBeInTheDocument();
+    expect(screen.queryByText('kunto')).not.toBeInTheDocument();
+  });
+
   it('Investissements : propose la répartition quand le plan n’est pas validé', async () => {
     const data: Dashboard = {
       ...fixtureDashboard,

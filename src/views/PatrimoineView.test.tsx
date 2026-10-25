@@ -1,18 +1,34 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { DisplayProvider } from '@/ui/display';
 import { fixtureDashboard } from '@/lib/fixtures';
 import type { Dashboard } from '@/lib/dashboard';
-import { AddAssetLink, PatrimoineView } from './PatrimoineView';
+import { PatrimoineView, type PatrimoineActions } from './PatrimoineView';
 
-beforeEach(() => localStorage.clear());
-afterEach(cleanup);
+const refresh = vi.fn();
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh, push: vi.fn(), replace: vi.fn() }) }));
+
+const ok = () => vi.fn().mockResolvedValue({ ok: true });
+let actions: PatrimoineActions;
+
+beforeEach(() => {
+  localStorage.clear();
+  refresh.mockClear();
+  actions = {
+    createAsset: ok(), updateAsset: ok(), archiveAsset: ok(), addMovement: ok(),
+    createDebt: ok(), updateDebt: ok(), deleteDebt: ok(),
+  };
+});
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 function setup(data: Dashboard = fixtureDashboard) {
   return render(
     <DisplayProvider fx={data.fx}>
-      <PatrimoineView data={data} />
+      <PatrimoineView data={data} actions={actions} />
     </DisplayProvider>,
   );
 }
@@ -152,7 +168,7 @@ describe('PatrimoineView', () => {
     expect(box).toHaveFocus();
     rerender(
       <DisplayProvider fx={fixtureDashboard.fx}>
-        <PatrimoineView data={{ ...fixtureDashboard }} />
+        <PatrimoineView data={{ ...fixtureDashboard }} actions={actions} />
       </DisplayProvider>,
     );
     expect(box).toHaveFocus();
@@ -205,12 +221,122 @@ describe('PatrimoineView', () => {
   });
 });
 
-describe('AddAssetLink', () => {
-  it('ouvre la base Notion dans un nouvel onglet', () => {
-    render(<AddAssetLink href="https://www.notion.so/assets" />);
-    const link = screen.getByRole('link', { name: /Ajouter/ });
-    expect(link).toHaveAttribute('href', 'https://www.notion.so/assets');
-    expect(link).toHaveAttribute('target', '_blank');
-    expect(link.getAttribute('rel')).toContain('noopener');
+describe('PatrimoineView — écriture', () => {
+  it('Ajouter ouvre la feuille de création d’un actif (plus de lien vers Notion)', async () => {
+    const user = userEvent.setup();
+    setup();
+    expect(screen.queryByRole('link')).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Ajouter' }));
+    expect(screen.getByRole('dialog', { name: 'Nouvel actif' })).toBeInTheDocument();
+  });
+
+  it('un clic sur une ligne d’actif ouvre l’édition pré-remplie', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(within(rowOf('Dar Sakan')).getByRole('button', { name: 'Modifier Dar Sakan' }));
+    const dialog = screen.getByRole('dialog', { name: 'Modifier l’actif' });
+    expect(within(dialog).getByLabelText('Nom')).toHaveValue('Dar Sakan');
+  });
+
+  it('les lignes d’actif sont des boutons tactiles dont le nom ne contient aucun montant (mode masqué)', async () => {
+    localStorage.setItem('wos.display', JSON.stringify({ currency: 'EUR', hidden: true }));
+    setup();
+    const buttons = screen.getAllByRole('button', { name: /^Modifier / });
+    expect(buttons).toHaveLength(19);
+    for (const b of buttons) {
+      expect(b.className).toContain('min-h-11');
+      expect(b.getAttribute('aria-label')).not.toMatch(/€|MAD|\$|%/);
+    }
+    const row = rowOf('Dar Sakan');
+    await vi.waitFor(() => expect(within(row).queryByText('110 599 €')).toBeNull());
+  });
+
+  it('un enregistrement réussi ferme la feuille, rafraîchit la route et rend le focus à la ligne', async () => {
+    const user = userEvent.setup();
+    setup();
+    const rowButton = within(rowOf('Revolut Current')).getByRole('button', { name: 'Modifier Revolut Current' });
+    await user.click(rowButton);
+    const dialog = screen.getByRole('dialog');
+    await user.clear(within(dialog).getByLabelText('Nom'));
+    await user.type(within(dialog).getByLabelText('Nom'), 'Revolut perso');
+    await user.click(within(dialog).getByRole('button', { name: 'Enregistrer' }));
+    expect(actions.updateAsset).toHaveBeenCalledWith('revolut', { name: 'Revolut perso' });
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(rowButton).toHaveFocus();
+  });
+
+  it('un échec garde la feuille ouverte avec la saisie et l’erreur, sans rafraîchir', async () => {
+    actions.updateAsset = vi.fn().mockResolvedValue({ ok: false, error: 'Enregistrement impossible, réessaie dans un instant.' });
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole('button', { name: 'Modifier Revolut Current' }));
+    const dialog = screen.getByRole('dialog');
+    await user.clear(within(dialog).getByLabelText('Nom'));
+    await user.type(within(dialog).getByLabelText('Nom'), 'Autre nom');
+    await user.click(within(dialog).getByRole('button', { name: 'Enregistrer' }));
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('réessaie');
+    expect(within(dialog).getByLabelText('Nom')).toHaveValue('Autre nom');
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it('Ajouter un mouvement depuis l’édition ouvre la saisie de mouvement de cet actif', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole('button', { name: 'Modifier Or physique' }));
+    await user.click(screen.getByRole('button', { name: 'Ajouter un mouvement' }));
+    const dialog = screen.getByRole('dialog', { name: 'Mouvement · Or physique' });
+    expect(within(dialog).getByLabelText('Poids fin (g)')).toBeInTheDocument();
+    await user.type(within(dialog).getByLabelText('Poids fin (g)'), '3,11');
+    await user.type(within(dialog).getByLabelText('Montant (EUR)'), '400');
+    await user.click(within(dialog).getByRole('button', { name: 'Enregistrer' }));
+    expect(actions.addMovement).toHaveBeenCalledWith(expect.objectContaining({ assetId: 'or', kind: 'buy', quantity: 3.11, amount: 400 }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('Archiver depuis la feuille appelle l’action d’archivage', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole('button', { name: 'Modifier Revolut Current' }));
+    await user.click(screen.getByRole('button', { name: 'Archiver' }));
+    expect(actions.archiveAsset).toHaveBeenCalledWith('revolut', true);
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
+
+  it('l’onglet Passifs propose « Ajouter un crédit » et masque « Ajouter » d’actif', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole('tab', { name: 'Passifs' }));
+    expect(screen.queryByRole('button', { name: 'Ajouter' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Ajouter un crédit' }));
+    expect(screen.getByRole('dialog', { name: 'Nouveau crédit' })).toBeInTheDocument();
+  });
+
+  it('un clic sur un crédit ouvre son édition ; Supprimer appelle l’action', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole('tab', { name: 'Passifs' }));
+    await user.click(screen.getByRole('button', { name: 'Modifier Crédit Dar Sakan' }));
+    const dialog = screen.getByRole('dialog', { name: 'Modifier le crédit' });
+    expect(within(dialog).getByLabelText('Nom')).toHaveValue('Crédit Dar Sakan');
+    await user.click(within(dialog).getByRole('button', { name: 'Supprimer' }));
+    expect(actions.deleteDebt).toHaveBeenCalledWith('credit-dar-sakan');
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('crée un crédit depuis l’onglet Passifs', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole('tab', { name: 'Passifs' }));
+    await user.click(screen.getByRole('button', { name: 'Ajouter un crédit' }));
+    const dialog = screen.getByRole('dialog');
+    await user.type(within(dialog).getByLabelText('Nom'), 'Prêt auto');
+    await user.type(within(dialog).getByLabelText(/^Capital restant dû/), '8000');
+    await user.click(within(dialog).getByRole('button', { name: 'Enregistrer' }));
+    expect(actions.createDebt).toHaveBeenCalledWith({ name: 'Prêt auto', currency: 'EUR', outstanding: 8000 });
   });
 });

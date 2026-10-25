@@ -1,14 +1,36 @@
 'use client';
 
 import { StaleBanner } from '@/ui/StaleBanner';
+import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ActionResult, AssetPatch, DebtPatch, MovementInput } from '@/app/patrimoine/patrimoineOps';
 import { parisDate } from '@/domain/dates';
 import { formatMoney, formatPct } from '@/domain/money';
-import type { AssetClass, Currency } from '@/domain/types';
+import type { AssetClass, AssetInput, Currency, DebtInput } from '@/domain/types';
 import type { Dashboard, ValuedAsset } from '@/lib/dashboard';
 import { Badge, type BadgeTone } from '@/ui/Badge';
 import { HIDDEN_TEXT, useDisplay } from '@/ui/display';
 import { Money } from '@/ui/Money';
+import { AssetSheet } from './AssetSheet';
+import { DebtSheet } from './DebtSheet';
+import { MovementSheet } from './MovementSheet';
+
+/** Actions d'écriture (server actions en production, doublures dans les tests). */
+export interface PatrimoineActions {
+  createAsset: (input: AssetInput) => Promise<ActionResult>;
+  updateAsset: (id: string, patch: AssetPatch) => Promise<ActionResult>;
+  archiveAsset: (id: string, archived: boolean) => Promise<ActionResult>;
+  addMovement: (m: MovementInput) => Promise<ActionResult>;
+  createDebt: (input: DebtInput) => Promise<ActionResult>;
+  updateDebt: (id: string, patch: DebtPatch) => Promise<ActionResult>;
+  deleteDebt: (id: string) => Promise<ActionResult>;
+}
+
+/** Feuille de formulaire ouverte : création / édition d'un actif, mouvement d'un actif, création / édition d'un crédit. */
+type FormSheet =
+  | { kind: 'asset'; id?: string }
+  | { kind: 'movement'; assetId: string }
+  | { kind: 'debt'; id?: string };
 
 type Tab = 'actifs' | 'passifs';
 type FilterKey = 'types' | 'institutions' | 'currencies';
@@ -97,22 +119,6 @@ function debtGroup(debts: Dashboard['debts']): GroupModel[] {
 
 function distinct(values: (string | undefined)[]): string[] {
   return [...new Set(values.filter((v): v is string => !!v))].sort((a, b) => a.localeCompare(b, 'fr'));
-}
-
-export function AddAssetLink({ href }: { href: string }) {
-  return (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="inline-flex min-h-11 items-center gap-1.5 rounded-full bg-accent px-4 text-[13px] font-bold text-[#1A1A1A]"
-    >
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
-        <path d="M12 5v14M5 12h14" />
-      </svg>
-      Ajouter
-    </a>
-  );
 }
 
 function FilterSheet({
@@ -208,40 +214,63 @@ function FilterSheet({
   );
 }
 
-function PositionRow({ row }: { row: RowModel }) {
+const ADD_BUTTON_CLASS =
+  'inline-flex min-h-11 items-center gap-1.5 rounded-full bg-accent px-4 text-[13px] font-bold text-[#1A1A1A]';
+
+function PositionRow({ row, onOpen }: { row: RowModel; onOpen: () => void }) {
   const { hidden } = useDisplay();
   const badge = perfBadge(row.gainPct);
   return (
-    <li className="flex min-h-11 items-center gap-3 border-t border-[#F1F2F4] px-4 py-3.5">
-      <span
-        aria-hidden="true"
-        className="flex h-10 w-10 flex-none items-center justify-center rounded-full text-[12px] font-extrabold"
-        style={{ background: row.bg, color: row.fg }}
+    <li className="border-t border-[#F1F2F4]">
+      <button
+        type="button"
+        aria-label={`Modifier ${row.name}`}
+        aria-haspopup="dialog"
+        onClick={onOpen}
+        className="flex min-h-11 w-full items-center gap-3 px-4 py-3.5 text-left"
       >
-        {row.ini}
-      </span>
-      <div className="flex min-w-0 flex-1 flex-col gap-[3px]">
-        <span className="truncate text-[14px] font-bold">{row.name}</span>
-        {row.sub ? <span className="truncate text-[12px] text-muted">{row.sub}</span> : null}
-        {row.warning ? <span className="text-[12px] font-semibold text-loss">⚠ {row.warning}</span> : null}
-      </div>
-      <div className="flex flex-none flex-col items-end gap-1 whitespace-nowrap">
-        <Money eur={row.eur} className="text-[14px] font-bold" />
-        {row.original ? (
-          <span className="text-[11px] text-muted">
-            {hidden ? HIDDEN_TEXT : formatMoney(row.original.amount, row.original.currency)}
-          </span>
-        ) : null}
-        {badge ? <Badge tone={badge.tone} className="!px-2 !py-0.5 !text-[11px]">{badge.text}</Badge> : null}
-      </div>
+        <span
+          aria-hidden="true"
+          className="flex h-10 w-10 flex-none items-center justify-center rounded-full text-[12px] font-extrabold"
+          style={{ background: row.bg, color: row.fg }}
+        >
+          {row.ini}
+        </span>
+        <span className="flex min-w-0 flex-1 flex-col gap-[3px]">
+          <span className="truncate text-[14px] font-bold">{row.name}</span>
+          {row.sub ? <span className="truncate text-[12px] text-muted">{row.sub}</span> : null}
+          {row.warning ? <span className="text-[12px] font-semibold text-loss">⚠ {row.warning}</span> : null}
+        </span>
+        <span className="flex flex-none flex-col items-end gap-1 whitespace-nowrap">
+          <Money eur={row.eur} className="text-[14px] font-bold" />
+          {row.original ? (
+            <span className="text-[11px] text-muted">
+              {hidden ? HIDDEN_TEXT : formatMoney(row.original.amount, row.original.currency)}
+            </span>
+          ) : null}
+          {badge ? <Badge tone={badge.tone} className="!px-2 !py-0.5 !text-[11px]">{badge.text}</Badge> : null}
+        </span>
+      </button>
     </li>
   );
 }
 
-export function PatrimoineView({ data }: { data: Dashboard }) {
+export function PatrimoineView({ data, actions }: { data: Dashboard; actions: PatrimoineActions }) {
+  const router = useRouter();
   const [tab, setTab] = useState<Tab>('actifs');
   const [filters, setFilters] = useState<Filters>(NO_FILTER);
   const [openSheet, setOpenSheet] = useState<FilterKey | null>(null);
+  const [form, setForm] = useState<FormSheet | null>(null);
+
+  // Écriture réussie : la feuille se ferme (le focus revient à la ligne ouverte) et la route est relue.
+  const done = () => {
+    setForm(null);
+    router.refresh();
+  };
+  const assetById = (id?: string) => data.assets.find((a) => a.id === id);
+  const editedAsset = form?.kind === 'asset' ? assetById(form.id) : undefined;
+  const movementAsset = form?.kind === 'movement' ? assetById(form.assetId) : undefined;
+  const editedDebt = form?.kind === 'debt' ? data.debts.find((d) => d.id === form.id) : undefined;
 
   const options: Record<FilterKey, string[]> = useMemo(() => ({
     types: distinct(data.assets.map((a) => a.assetClass)),
@@ -267,21 +296,34 @@ export function PatrimoineView({ data }: { data: Dashboard }) {
     <div className="flex flex-col gap-4">
       <StaleBanner data={data} />
 
-      <div role="tablist" aria-label="Actifs et passifs" className="flex gap-6 border-b border-border">
-        {([['actifs', 'Actifs'], ['passifs', 'Passifs']] as const).map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            role="tab"
-            aria-selected={tab === value}
-            onClick={() => setTab(value)}
-            className={`-mb-px min-h-11 border-b-2 text-[16px] font-bold ${
-              tab === value ? 'border-foreground text-foreground' : 'border-transparent text-muted'
-            }`}
-          >
-            {label}
-          </button>
-        ))}
+      <div className="flex items-end justify-between gap-3 border-b border-border">
+        <div role="tablist" aria-label="Actifs et passifs" className="flex gap-6">
+          {([['actifs', 'Actifs'], ['passifs', 'Passifs']] as const).map(([value, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={tab === value}
+              onClick={() => setTab(value)}
+              className={`-mb-px min-h-11 border-b-2 text-[16px] font-bold ${
+                tab === value ? 'border-foreground text-foreground' : 'border-transparent text-muted'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          aria-haspopup="dialog"
+          onClick={() => setForm(tab === 'actifs' ? { kind: 'asset' } : { kind: 'debt' })}
+          className={`${ADD_BUTTON_CLASS} mb-1`}
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden="true">
+            <path d="M12 5v14M5 12h14" />
+          </svg>
+          {tab === 'actifs' ? 'Ajouter' : 'Ajouter un crédit'}
+        </button>
       </div>
 
       {tab === 'actifs' ? (
@@ -329,7 +371,13 @@ export function PatrimoineView({ data }: { data: Dashboard }) {
             <Money eur={g.sumEur} className="text-[13px] font-bold" />
           </div>
           <ul>
-            {g.rows.map((r) => <PositionRow key={r.id} row={r} />)}
+            {g.rows.map((r) => (
+              <PositionRow
+                key={r.id}
+                row={r}
+                onOpen={() => setForm(tab === 'actifs' ? { kind: 'asset', id: r.id } : { kind: 'debt', id: r.id })}
+              />
+            ))}
           </ul>
         </section>
       ))}
@@ -338,6 +386,36 @@ export function PatrimoineView({ data }: { data: Dashboard }) {
         <p className="py-6 text-center text-[14px] text-muted">
           {tab === 'actifs' ? 'Aucun actif ne correspond aux filtres.' : 'Aucun passif.'}
         </p>
+      ) : null}
+
+      {form?.kind === 'asset' && (form.id === undefined || editedAsset) ? (
+        <AssetSheet
+          key={form.id ?? 'nouveau'}
+          asset={editedAsset}
+          actions={{ create: actions.createAsset, update: actions.updateAsset, archive: actions.archiveAsset }}
+          onClose={() => setForm(null)}
+          onDone={done}
+          onAddMovement={editedAsset ? () => setForm({ kind: 'movement', assetId: editedAsset.id }) : undefined}
+        />
+      ) : null}
+      {movementAsset ? (
+        <MovementSheet
+          key={movementAsset.id}
+          asset={movementAsset}
+          actions={{ add: actions.addMovement }}
+          onClose={() => setForm(null)}
+          onDone={done}
+        />
+      ) : null}
+      {form?.kind === 'debt' && (form.id === undefined || editedDebt) ? (
+        <DebtSheet
+          key={form.id ?? 'nouveau'}
+          debt={editedDebt}
+          assets={data.assets}
+          actions={{ create: actions.createDebt, update: actions.updateDebt, remove: actions.deleteDebt }}
+          onClose={() => setForm(null)}
+          onDone={done}
+        />
       ) : null}
 
       {sheet ? (

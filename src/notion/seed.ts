@@ -62,7 +62,8 @@ const assets: Asset[] = [
   withValue(manual({ id: 'syla', name: 'Syla Invest', assetClass: 'Startups', currency: 'EUR', manualValue: 2_000, costBasis: 2_000 }), 2_000),
   withValue(manual({ id: 'kunto', name: 'kunto', assetClass: 'Startups', currency: 'EUR', manualValue: 1_500, costBasis: 1_500 }), 1_500),
   withValue(manual({ id: 'fullsoon', name: 'Fullsoon', assetClass: 'Startups', currency: 'EUR', manualValue: 1_500, costBasis: 1_500 }), 1_500),
-  // Métaux précieux (quantité en grammes fins ; valeurs arrondies comme sur la maquette)
+  // Métaux précieux (quantité en grammes fins ; valeurs arrondies comme sur la maquette).
+  // Le seed reprend les KPI du tableur de l'utilisateur, connus pour être incohérents avec les lignes d'achat (à corriger par l'utilisateur avant l'import).
   withValue({
     id: 'or', name: 'Or physique', assetClass: 'Métaux précieux', institution: 'Physique', currency: 'EUR', mode: 'auto', quoteId: 'XAU',
     quantity: 24.9, costBasis: 2_402, unitPrice: 125_926, archived: false, syncStatus: 'ok', lastUpdate: TODAY,

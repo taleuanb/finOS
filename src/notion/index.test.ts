@@ -1,4 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+const cacheCalls = vi.hoisted(() => [] as unknown[][]);
+vi.mock('next/cache', () => ({
+  unstable_cache: (...args: unknown[]) => { cacheCalls.push(args); return args[0]; },
+}));
+
 import { FakeRepo } from './fakeRepo';
 import { getRepo, isDemo } from './index';
 
@@ -55,5 +60,15 @@ describe('getRepo', () => {
     expect(getRepo()).toBe(repo);
     vi.stubEnv('NOTION_DB_ASSETS', 'ds-autre');
     expect(getRepo()).not.toBe(repo);
+  });
+
+  it('le schéma des bases est mis en cache entre instances (24 h, tag notion-schema), sans jamais mettre un échec en cache', () => {
+    vi.stubEnv('NOTION_TOKEN', 'secret_schema');
+    for (const v of DB_VARS) vi.stubEnv(v, `ds-${v}`);
+    cacheCalls.length = 0;
+    getRepo();
+    expect(cacheCalls).toHaveLength(1);
+    expect(cacheCalls[0][1]).toEqual(['notion-schema']);
+    expect(cacheCalls[0][2]).toEqual({ revalidate: 86_400, tags: ['notion-schema'] });
   });
 });

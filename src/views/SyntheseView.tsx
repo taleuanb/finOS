@@ -24,7 +24,7 @@ const PERIOD_CAPTION: Record<Period, string> = {
   '1M': 'sur 1 mois',
   YTD: 'depuis le 1er janvier',
   '1A': 'sur 1 an',
-  Tout: 'depuis le début',
+  Tout: 'sur la période disponible',
 };
 
 const CLASS_COLORS: Record<AssetClass, string> = {

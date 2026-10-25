@@ -1,6 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Client } from '@notionhq/client';
 import assetEtf from './__fixtures__/asset-etf.json';
+import debtFixture from './__fixtures__/debt.json';
+import budgetFixture from './__fixtures__/budget-line.json';
+import planFixture from './__fixtures__/plan-line.json';
 import movementFixture from './__fixtures__/movement.json';
 import assetManual from './__fixtures__/asset-manual-no-currency.json';
 import snapshot from './__fixtures__/snapshot.json';
@@ -311,15 +314,67 @@ describe('colonnes utiles (filter_properties)', () => {
     expect(a).toEqual({ ...full, quantity: 0, costBasis: 0 });
   });
 
-  it('chaque base de lecture filtre ses colonnes (dettes, budget, Stratégie, plan, historique)', async () => {
-    const stub = { id: 'p', properties: { Nom: { type: 'title', title: [] } } };
-    const defs = { 'ds-debts': 'Nom', 'ds-budget': 'Nom', 'ds-strategy': 'Clé', 'ds-plan': 'Mois', 'ds-history': 'Nom' } as const;
-    const schema = Object.fromEntries(Object.entries(defs).map(([ds, title]) => [ds, { [title]: { id: `id:${title}`, type: 'title' }, Autre: { id: 'id:Autre', type: 'number' } }]));
-    const { client, queries } = schemaClient(Object.fromEntries(Object.keys(defs).map((ds) => [ds, [stub]])), schema);
-    const repo = createNotionRepo(client, ids);
-    await Promise.all([repo.listDebts(), repo.listBudget(), repo.getStrategy(), repo.listPlan(), repo.listSnapshots()]);
-    expect(queries).toHaveLength(5);
-    for (const q of queries) expect(q.filter_properties).toContain(`id:${defs[q.data_source_id as keyof typeof defs]}`);
+  it('lire avec les colonnes filtrées donne exactement la même chose que sans filtre (dettes, budget, Stratégie, plan, historique)', async () => {
+    const strategyPages = strategyRows as unknown as { id: string; properties: Record<string, { type: string }> }[];
+    const fixtures: Record<string, unknown[]> = {
+      'ds-debts': [debtFixture], 'ds-budget': [budgetFixture], 'ds-strategy': strategyPages, 'ds-plan': [planFixture], 'ds-history': [snapshot],
+    };
+    const schema = Object.fromEntries(Object.entries(fixtures).map(([ds, pages]) => [ds, schemaOf(pages[0] as never)]));
+    const read = (client: NotionClientLike) => {
+      const repo = createNotionRepo(client, ids);
+      return Promise.all([repo.listDebts(), repo.listBudget(), repo.getStrategy(), repo.listPlan(), repo.listSnapshots('2000-01-01')]);
+    };
+    const filtered = schemaClient(fixtures, schema);
+    const unfiltered = fakeClient(Object.fromEntries(Object.entries(fixtures).map(([ds, pages]) => [ds, [pages]])));
+    const out = await read(filtered.client);
+    expect(out).toEqual(await read(unfiltered.client));
+    expect(out[0]).toHaveLength(1);
+    expect(out[4][0].byClass['Fonds & ETF']).not.toBe(0); // la fixture porte bien des valeurs à retrouver
+    expect(filtered.queries).toHaveLength(5);
+    for (const q of filtered.queries) expect(q.filter_properties?.length).toBeGreaterThan(1);
+  });
+
+  it("l'historique demande une colonne par propriété de P.history (titre, date, totaux, classes, taux, ratio, partiel)", async () => {
+    const { client, queries } = schemaClient({ 'ds-history': [snapshot] }, { 'ds-history': schemaOf(snapshot as never) });
+    await createNotionRepo(client, ids).listSnapshots();
+    const sent = new Set(queries[0].filter_properties);
+    const { byClass, ...simple } = P.history;
+    const expected: string[] = [...Object.values(simple), ...Object.values(byClass)];
+    expect(expected).toHaveLength(9 + 10); // 9 colonnes simples + 10 classes
+    for (const name of expected) expect(sent.has(`id:${name}`), name).toBe(true);
+  });
+
+  it("un chargeur de schéma fourni est utilisé à la place de retrieve ; son échec donne une lecture non filtrée", async () => {
+    const { client, queries, retrieve } = schemaClient({ 'ds-assets': [assetEtf] }, { 'ds-assets': schemaOf(assetEtf) });
+    const loader = vi.fn(async (_dsId: string) => schemaOf(assetEtf));
+    const repo = createNotionRepo(client, ids, undefined, { schema: loader });
+    await repo.listAssets();
+    expect(loader).toHaveBeenCalledWith('ds-assets');
+    expect(retrieve).not.toHaveBeenCalled();
+    expect(queries[0].filter_properties).toContain('id:Nom');
+
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const failing = createNotionRepo(client, ids, undefined, { schema: async () => { throw new Error('cache KO'); } });
+    const [a] = await failing.listAssets();
+    expect(queries[1].filter_properties).toBeUndefined();
+    expect(a.name).toBe(pageToAsset(assetEtf).name);
+  });
+
+  it("le schéma mémorisé par instance expire au bout d'une heure", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const { client, retrieve } = schemaClient({ 'ds-assets': [assetEtf] }, { 'ds-assets': schemaOf(assetEtf) });
+      const repo = createNotionRepo(client, ids);
+      await repo.listAssets();
+      vi.advanceTimersByTime(59 * 60_000);
+      await repo.listAssets();
+      expect(retrieve).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(2 * 60_000);
+      await repo.listAssets();
+      expect(retrieve).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("le schéma n'est lu qu'une fois par base (mémoïsé)", async () => {

@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { revalidateNotion } from '@/lib/cacheTags';
 import { getDashboard } from '@/lib/load';
 import { getRepo } from '@/notion';
@@ -13,30 +13,37 @@ export const maxDuration = 60;
 
 /** Synchronisation quotidienne. L'authentification (session ou Bearer CRON_SECRET) est faite par le middleware. */
 async function handle(): Promise<Response> {
+  const t0 = Date.now();
+  let report: Awaited<ReturnType<typeof runSync>>;
   try {
-    const t0 = Date.now();
-    const report = await runSync({
+    report = await runSync({
       repo: getRepo(),
       yahoo: createYahooProvider(),
       crypto: createCoinGeckoProvider(),
       fx: createFxProvider(),
       now: new Date(),
     });
-    const t1 = Date.now();
-    // La synchro n'écrit que les valorisations (actifs), les cours spot (mouvements) et la photo du jour (historique).
+  } catch (e) {
+    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+  } finally {
+    // Invalidation même si la synchro échoue tard (des actifs ont pu être écrits). Elle n'écrit que les valorisations
+    // (actifs), les cours spot (mouvements) et la photo du jour (historique).
     revalidateNotion('assets', 'movements', 'history');
-    // Préchauffage : la première visite de la journée trouve des caches pleins. Une erreur ici ne doit rien casser.
+  }
+  const syncMs = Date.now() - t0;
+  console.log(`[perf] sync ${syncMs}ms`);
+  // Préchauffage une fois la réponse envoyée : la première visite de la journée trouve des caches pleins,
+  // sans que la réponse (et la durée max de 60 s) en dépende. Une erreur ici ne doit rien casser.
+  after(async () => {
+    const t1 = Date.now();
     try {
       await getDashboard();
+      console.log(`[perf] préchauffage ${Date.now() - t1}ms`);
     } catch (e) {
       console.error('Préchauffage du tableau de bord impossible', e);
     }
-    const t2 = Date.now();
-    console.log(`[perf] sync ${t1 - t0}ms, préchauffage ${t2 - t1}ms`);
-    return NextResponse.json(report, { headers: { 'Server-Timing': `sync;dur=${t1 - t0}, warm;dur=${t2 - t1}` } });
-  } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
-  }
+  });
+  return NextResponse.json(report, { headers: { 'Server-Timing': `sync;dur=${syncMs}` } });
 }
 
 export const GET = handle;

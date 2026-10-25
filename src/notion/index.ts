@@ -1,7 +1,8 @@
+import { unstable_cache } from 'next/cache';
 import type { Repo } from './repo';
 import { FakeRepo, fixtureSeed } from './fakeRepo';
 import { createNotionClient, withRateLimit } from './client';
-import { createNotionRepo } from './notionRepo';
+import { createNotionRepo, retrieveSchema } from './notionRepo';
 import { DB } from './schema';
 
 // Un seul FakeRepo par processus : en dev, les écritures persistent d'une requête à l'autre.
@@ -35,6 +36,16 @@ export function getRepo(): Repo {
   }
   const ids = Object.fromEntries(names.map(([k, v]) => [k, process.env[v]!])) as Record<keyof typeof DB, string>;
   const signature = JSON.stringify([token, ids]);
-  if (notion?.signature !== signature) notion = { signature, repo: createNotionRepo(createNotionClient(token), ids, withRateLimit) };
+  if (notion?.signature !== signature) {
+    const client = createNotionClient(token);
+    // Le schéma des bases (nom de colonne -> identifiant) change rarement : un cache partagé entre instances serverless
+    // évite qu'une instance froide paie un `retrieve` par base. Un échec n'est jamais mis en cache.
+    const schema = unstable_cache(
+      (dsId: string) => retrieveSchema(client, dsId, withRateLimit),
+      ['notion-schema'],
+      { revalidate: 86_400, tags: ['notion-schema'] },
+    );
+    notion = { signature, repo: createNotionRepo(client, ids, withRateLimit, { schema }) };
+  }
   return notion.repo;
 }

@@ -44,9 +44,9 @@ const identity: Limit = (fn) => fn();
 /** Profondeur de l'historique lu par défaut (jours) : au-delà, les graphiques n'en ont pas besoin. */
 const HISTORY_DAYS = 800;
 
-/** Noms des colonnes d'une base, sauf celles listées (calculées par Notion, jamais lues par les mappers). */
-const columns = <T extends Record<string, string>>(props: T, ...omit: (keyof T)[]): string[] =>
-  (Object.keys(props) as (keyof T)[]).filter((k) => !omit.includes(k)).map((k) => props[k]);
+/** Noms des colonnes d'une base (valeurs de `schema.ts`, y compris imbriquées), sauf les clés de premier niveau listées. */
+const columns = (props: object, ...omit: string[]): string[] =>
+  Object.entries(props).flatMap(([key, v]) => (omit.includes(key) ? [] : typeof v === 'string' ? [v] : columns(v as object)));
 
 /**
  * Colonnes réellement lues par les mappers (le titre y figure toujours). Les colonnes calculées par Notion
@@ -59,43 +59,57 @@ const DEBT_COLUMNS = columns(P.debts);
 const BUDGET_COLUMNS = columns(P.budget);
 const STRATEGY_COLUMNS = columns(P.strategy);
 const PLAN_COLUMNS = columns(P.plan);
-const HISTORY_COLUMNS = [
-  P.history.title, P.history.date, P.history.totalAssetsEur, P.history.totalDebtsEur, P.history.netEur,
-  ...Object.values(P.history.byClass), P.history.goldSilverRatio, P.history.eurMad, P.history.eurUsd, P.history.partial,
-];
+const HISTORY_COLUMNS = columns(P.history); // titre, date, totaux, une colonne par classe, taux, ratio, partiel
 
 const isPage = (r: unknown): r is NotionPage =>
   typeof r === 'object' && r !== null && typeof (r as NotionPage).id === 'string' && typeof (r as NotionPage).properties === 'object' && (r as NotionPage).properties !== null;
 
-export function createNotionRepo(client: NotionClientLike, ids: Record<keyof typeof DB, string>, limit: Limit = identity): Repo {
-  /** Noms -> identifiants de propriétés par base (un `retrieve` par base et par processus, échecs non mémorisés). */
-  const schemas = new Map<string, Promise<Map<string, { id: string; type?: string }> | null>>();
-  function schemaOf(dsId: string): Promise<Map<string, { id: string; type?: string }> | null> {
-    const known = schemas.get(dsId);
-    if (known) return known;
-    const loading = (async () => {
-      const retrieve = client.dataSources.retrieve;
-      if (!retrieve) return null;
-      try {
-        const ds = await limit(() => retrieve.call(client.dataSources, { data_source_id: dsId }));
-        return ds.properties ? new Map(Object.entries(ds.properties)) : null;
-      } catch (e) {
-        console.error('Notion : schéma illisible, lecture non filtrée', e instanceof Error ? e.message : e);
-        schemas.delete(dsId);
-        return null;
-      }
-    })();
-    schemas.set(dsId, loading);
-    return loading;
-  }
+/** Schéma d'une base : nom de colonne -> identifiant et type Notion. */
+export type DataSourceSchema = Record<string, { id: string; type: string }>;
+
+/** Lit le schéma d'une base (un appel Notion, protégé par `limit`). Lève si Notion ne le donne pas. */
+export async function retrieveSchema(client: NotionClientLike, dsId: string, limit: Limit = identity): Promise<DataSourceSchema> {
+  const retrieve = client.dataSources.retrieve;
+  if (!retrieve) throw new Error('dataSources.retrieve indisponible');
+  const ds = await limit(() => retrieve.call(client.dataSources, { data_source_id: dsId }));
+  if (!ds.properties) throw new Error('schéma de la base absent de la réponse');
+  return Object.fromEntries(Object.entries(ds.properties).map(([name, def]) => [name, { id: def.id, type: def.type ?? '' }]));
+}
+
+/** Durée de vie, par instance, du schéma mémorisé quand aucun chargeur n'est fourni (une colonne renommée y est reprise). */
+const SCHEMA_TTL_MS = 3_600_000;
+
+/**
+ * `opts.schema` : chargeur du schéma d'une base, typiquement mis en cache entre instances (`unstable_cache`) ;
+ * par défaut, un `retrieve` mémorisé par instance pendant 1 h. Dans tous les cas, un échec donne une lecture non filtrée.
+ */
+export function createNotionRepo(
+  client: NotionClientLike, ids: Record<keyof typeof DB, string>, limit: Limit = identity,
+  opts: { schema?: (dsId: string) => Promise<DataSourceSchema> } = {},
+): Repo {
+  const memo = new Map<string, { at: number; schema: Promise<DataSourceSchema> }>();
+  const loadSchema = opts.schema ?? ((dsId: string): Promise<DataSourceSchema> => {
+    const known = memo.get(dsId);
+    if (known && Date.now() - known.at < SCHEMA_TTL_MS) return known.schema;
+    const schema = retrieveSchema(client, dsId, limit);
+    memo.set(dsId, { at: Date.now(), schema });
+    schema.catch(() => { if (memo.get(dsId)?.schema === schema) memo.delete(dsId); }); // un échec n'est jamais mémorisé
+    return schema;
+  });
+  const canReadSchema = opts.schema !== undefined || client.dataSources.retrieve !== undefined;
 
   /** Identifiants des colonnes demandées (+ le titre) ; `undefined` = pas de filtre (schéma indisponible). */
   async function filterPropertyIds(dsId: string, names: readonly string[]): Promise<string[] | undefined> {
-    const schema = await schemaOf(dsId);
-    if (!schema) return undefined;
-    const ids = new Set<string>();
-    for (const [name, def] of schema) if (def.type === 'title' || names.includes(name)) ids.add(def.id);
-    return ids.size > 0 ? [...ids] : undefined;
+    if (!canReadSchema) return undefined;
+    try {
+      const schema = await loadSchema(dsId);
+      const ids = new Set<string>();
+      for (const [name, def] of Object.entries(schema)) if (def.type === 'title' || names.includes(name)) ids.add(def.id);
+      return ids.size > 0 ? [...ids] : undefined;
+    } catch (e) {
+      console.error('Notion : schéma illisible, lecture non filtrée', e instanceof Error ? e.message : e);
+      return undefined;
+    }
   }
 
   /**

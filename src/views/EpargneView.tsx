@@ -8,6 +8,7 @@ import { formatMoney, fromEur } from '@/domain/money';
 import { AllocationError } from '@/domain/types';
 import type { AllocationLine, Asset, Currency, FxRates } from '@/domain/types';
 import type { Dashboard, PlanLineView } from '@/lib/dashboard';
+import { StaleBanner } from '@/ui/StaleBanner';
 import { Badge } from '@/ui/Badge';
 import { Card } from '@/ui/Card';
 import { HIDDEN_TEXT, useDisplay } from '@/ui/display';
@@ -15,7 +16,6 @@ import { Money, formatDisplayMoney } from '@/ui/Money';
 import { Segmented } from '@/ui/Segmented';
 import { SplitBar } from '@/ui/charts/SplitBar';
 import { StackedBars } from '@/ui/charts/StackedBars';
-import { formatDateFr } from '@/ui/charts/shared';
 
 type ActionResult = { ok: true } | { ok: false; error: string };
 
@@ -492,11 +492,7 @@ export function EpargneView({ data, validatePlan, declarePurchase }: EpargneView
 
   return (
     <>
-      {data.stale ? (
-        <p className="rounded-xl bg-[#FFF6EE] px-3 py-2 text-[13px] font-semibold text-[#9A4A0E]">
-          Données du {formatDateFr(data.asOf)}
-        </p>
-      ) : null}
+      <StaleBanner data={data} />
 
       <section aria-label="Épargne du mois" className="flex flex-col gap-3.5 rounded-[20px] border border-border bg-card px-[18px] py-5">
         <span className="text-sm font-medium text-muted">Épargne du mois</span>

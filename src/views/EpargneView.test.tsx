@@ -93,8 +93,9 @@ describe('EpargneView — plan validé', () => {
   });
 
   it('affiche la bannière de données anciennes', () => {
-    renderView({ ...fixtureDashboard, stale: true, asOf: '2026-10-20' });
-    expect(screen.getByText(/Données du 20\/10\/2026/)).toBeInTheDocument();
+    // M2 : bandeau commun (StaleBanner) : date de la dernière synchro à Paris, format long.
+    renderView({ ...fixtureDashboard, stale: true, asOf: '2026-10-27', lastSyncOk: '2026-10-20T05:00:00Z' });
+    expect(screen.getByText('Données du 20 octobre 2026')).toBeInTheDocument();
   });
 });
 

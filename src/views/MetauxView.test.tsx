@@ -124,17 +124,17 @@ describe('MetauxView', () => {
 
   it('affiche la bannière de données anciennes', () => {
     view({ ...fixtureDashboard, stale: true, lastSyncOk: '2026-10-20T05:00:00Z' });
-    expect(screen.getByText(/Données du 20\/10\/2026/)).toBeTruthy();
+    expect(screen.getByText('Données du 20 octobre 2026')).toBeTruthy(); // M2 : format commun
   });
 
   it('date la bannière de données anciennes à Paris (23:30 UTC le 31/10 = 01/11)', () => {
     view({ ...fixtureDashboard, stale: true, lastSyncOk: '2026-10-31T23:30:00Z' });
-    expect(screen.getByText('Données du 01/11/2026')).toBeTruthy();
+    expect(screen.getByText('Données du 1 novembre 2026')).toBeTruthy();
   });
 
   it('retombe sur asOf si lastSyncOk est absent ou invalide', () => {
     view({ ...fixtureDashboard, stale: true, lastSyncOk: 'pas une date', asOf: '2026-10-25' });
-    expect(screen.getByText('Données du 25/10/2026')).toBeTruthy();
+    expect(screen.getByText('Données du 25 octobre 2026')).toBeTruthy();
   });
 
   it('une prime négative ou faible n\'est pas en vert', () => {

@@ -1,5 +1,6 @@
 'use client';
 
+import { StaleBanner } from '@/ui/StaleBanner';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { parisDate } from '@/domain/dates';
 import { formatMoney, formatPct } from '@/domain/money';
@@ -264,11 +265,7 @@ export function PatrimoineView({ data }: { data: Dashboard }) {
 
   return (
     <div className="flex flex-col gap-4">
-      {data.stale ? (
-        <p role="status" className="rounded-xl bg-loss-bg px-3 py-2 text-[13px] font-semibold text-loss">
-          Données du {readableDate(data.lastSyncOk ?? data.asOf)}
-        </p>
-      ) : null}
+      <StaleBanner data={data} />
 
       <div role="tablist" aria-label="Actifs et passifs" className="flex gap-6 border-b border-border">
         {([['actifs', 'Actifs'], ['passifs', 'Passifs']] as const).map(([value, label]) => (

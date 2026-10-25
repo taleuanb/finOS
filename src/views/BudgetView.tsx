@@ -6,9 +6,9 @@ import { budgetSankey, summarizeBudget } from '@/domain/budget';
 import { toEur } from '@/domain/money';
 import type { BudgetLine, Currency } from '@/domain/types';
 import type { Dashboard } from '@/lib/dashboard';
+import { StaleBanner } from '@/ui/StaleBanner';
 import { Card } from '@/ui/Card';
 import { SankeyChart, type SankeyData } from '@/ui/charts/SankeyChart';
-import { formatDateFr } from '@/ui/charts/shared';
 import { useDisplay } from '@/ui/display';
 import { Money } from '@/ui/Money';
 import type { ActionResult, BudgetLineInput, SaveResult } from '@/app/budget/budgetOps';
@@ -282,11 +282,7 @@ export function BudgetView({ data, actions }: { data: Dashboard; actions: Budget
 
   return (
     <div className="flex flex-col gap-4">
-      {data.stale ? (
-        <div role="status" className="rounded-xl bg-loss-bg px-3 py-2 text-[13px] font-semibold text-loss">
-          Données du {formatDateFr(data.asOf)}
-        </div>
-      ) : null}
+      <StaleBanner data={data} />
 
       <p className="text-sm leading-relaxed text-muted">
         Ton budget type du mois. L&apos;épargne qui en sort alimente ton plan d&apos;investissement.

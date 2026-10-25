@@ -2,11 +2,11 @@
 
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { parisDate } from '@/domain/dates';
 import { formatMoney, formatPct } from '@/domain/money';
 import { neutralZone } from '@/domain/zones';
 import type { MetalZone } from '@/domain/types';
 import type { Dashboard, MetalPosition, MetalPurchaseView } from '@/lib/dashboard';
+import { StaleBanner } from '@/ui/StaleBanner';
 import { Badge } from '@/ui/Badge';
 import { Card } from '@/ui/Card';
 import { HIDDEN_TEXT, useDisplay } from '@/ui/display';
@@ -31,14 +31,6 @@ function useGramsText(): (g: number) => string {
   return (g) => (hidden ? HIDDEN_TEXT : `${num(g, 0, 2)} g`);
 }
 
-/** Date de fraîcheur des données, au jour de Paris ; retombe sur `asOf` si `lastSyncOk` est absent ou invalide. */
-function staleDay(data: Dashboard): string {
-  if (data.lastSyncOk) {
-    const t = new Date(data.lastSyncOk);
-    if (!Number.isNaN(t.getTime())) return parisDate(t);
-  }
-  return data.asOf;
-}
 const pricePerKg = (eur: number) => `${formatMoney(eur, 'EUR')} / kg`;
 
 function segmentColor(goldShare: number): string {
@@ -250,11 +242,7 @@ export function MetauxView({ data }: { data: Dashboard }) {
 
   return (
     <div className="flex flex-col gap-4">
-      {data.stale ? (
-        <p role="status" className="rounded-2xl border border-[#F6D3B5] bg-[#FFF6EE] px-4 py-3 text-[13px] font-semibold text-[#9A4A0E]">
-          Données du {formatDateFr(staleDay(data))}
-        </p>
-      ) : null}
+      <StaleBanner data={data} />
 
       {metals.gridWarning ? (
         <p role="alert" className="rounded-2xl bg-loss-bg px-4 py-3 text-[13px] font-semibold text-loss">

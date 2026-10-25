@@ -3,9 +3,9 @@
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 import { formatPct } from '@/domain/money';
-import { parisDate } from '@/domain/dates';
 import type { AssetClass, Currency } from '@/domain/types';
 import type { Dashboard, Period } from '@/lib/dashboard';
+import { StaleBanner } from '@/ui/StaleBanner';
 import { Badge } from '@/ui/Badge';
 import { useDisplay } from '@/ui/display';
 import { Money } from '@/ui/Money';
@@ -55,12 +55,6 @@ export function periodStart(period: Period, asOf: string): string | null {
   const tm = (index % 12) + 1;
   const dim = new Date(Date.UTC(ty, tm, 0)).getUTCDate();
   return `${ty}-${String(tm).padStart(2, '0')}-${String(Math.min(day, dim)).padStart(2, '0')}`;
-}
-
-function longDate(iso: string): string {
-  return new Date(`${iso}T00:00:00Z`).toLocaleDateString('fr-FR', {
-    day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC',
-  });
 }
 
 function shortDate(iso: string): string {
@@ -164,17 +158,12 @@ export function SyntheseView({ data: d }: { data: Dashboard }) {
   }, [d.history, d.asOf, period]);
 
   const variation = d.variations[period];
-  const staleDate = longDate(d.lastSyncOk ? parisDate(new Date(d.lastSyncOk)) : d.asOf);
   const plan = d.plan;
   const planMonth = ofMonth(plan.month);
 
   return (
     <>
-      {d.stale ? (
-        <div role="status" className="rounded-2xl border border-[#F6D3B5] bg-[#FFF6EE] px-4 py-3 text-[13px] font-semibold text-[#9A4A0E]">
-          Données du {staleDate}
-        </div>
-      ) : null}
+      <StaleBanner data={d} />
 
       <section
         aria-label="Patrimoine net"

@@ -475,7 +475,6 @@ export function EpargneView({ data, validatePlan, declarePurchase }: EpargneView
     openerRef.current = null;
     if (opener?.isConnected) opener.focus();
   }
-  const strategyUrl = process.env.NEXT_PUBLIC_NOTION_STRATEGY_URL;
   const savingsAsset = data.assets.find((a) => a.id === data.strategy.savingsAssetId);
   const assetOf = (id: string) => data.assets.find((a) => a.id === id);
 
@@ -529,13 +528,15 @@ export function EpargneView({ data, validatePlan, declarePurchase }: EpargneView
       {plan.allocationError ? (
         <div role="alert" className="flex flex-col gap-2 rounded-[20px] bg-loss-bg p-4 text-loss">
           <p className="text-[14px] font-bold">{plan.allocationError}</p>
-          {strategyUrl ? (
-            <a href={strategyUrl} target="_blank" rel="noreferrer" className="inline-flex min-h-11 items-center text-[13px] font-semibold underline">
-              Ouvrir la Stratégie dans Notion
-            </a>
-          ) : null}
+          <Link href="/strategie" className="inline-flex min-h-11 items-center text-[13px] font-semibold underline">
+            Régler la stratégie
+          </Link>
         </div>
-      ) : null}
+      ) : (
+        <Link href="/strategie" className="inline-flex min-h-11 items-center self-start text-[13px] font-semibold text-[#A24E0E]">
+          Régler la stratégie
+        </Link>
+      )}
 
       {!plan.validated && plan.proposal ? <Proposal key={plan.month} data={data} validatePlan={validatePlan} /> : null}
 

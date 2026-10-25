@@ -34,6 +34,23 @@ export interface Debt {
   rate?: number; monthly?: number; endDate?: string; financedAssetId?: string; valueEur?: number;
 }
 
+/** Saisie d'un actif depuis l'app (jamais les champs rollups / formules / « script »). */
+export interface AssetInput {
+  name: string; assetClass: AssetClass; subtype?: string; institution?: string;
+  currency: Currency; mode: 'auto' | 'manual'; quoteId?: string;
+  manualValue?: number; manualValueDate?: string;      // yyyy-mm-dd
+  fixedMonthly?: number; archived?: boolean;
+}
+
+/** Saisie d'un crédit depuis l'app (la valeur € est calculée ailleurs). */
+export interface DebtInput {
+  name: string; type?: string; currency: Currency; outstanding: number;
+  rate?: number; monthly?: number; endDate?: string; financedAssetId?: string;
+}
+
+/** Écriture d'une ligne clé/valeur de la base Stratégie. */
+export interface StrategyEntryInput { key: string; value?: number | null; text?: string | null; assetId?: string | null }
+
 export interface BudgetLine {
   id: string; name: string; section: 'revenu' | 'depense'; category: string;
   monthlyAmount: number; currency: Currency; order: number;

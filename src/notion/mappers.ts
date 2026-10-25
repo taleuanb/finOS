@@ -2,7 +2,7 @@ import type { Client } from '@notionhq/client';
 // Conversion pages Notion <-> objets du domaine. Noms exacts des propriétés : voir `schema.ts`.
 import {
   ASSET_CLASSES, DEFAULT_METAL_GRID,
-  type Asset, type AssetClass, type BudgetLine, type Currency, type Debt, type MetalZone, type Movement,
+  type Asset, type AssetClass, type AssetInput, type BudgetLine, type DebtInput, type StrategyEntryInput, type Currency, type Debt, type MetalZone, type Movement,
   type PlanLine, type Snapshot, type Strategy,
 } from '@/domain/types';
 import { OPT, P, STRATEGY_KEY } from './schema';
@@ -148,6 +148,32 @@ export function valuationToProperties(patch: { unitPrice?: number; value: number
   return props;
 }
 
+/** Patch d'écriture : clé absente (ou `undefined`) = inchangé, `null` = champ optionnel vidé. */
+export type Patch<T> = { [K in keyof T]?: T[K] | null };
+
+/**
+ * Propriétés d'entrée d'un actif saisies dans l'app (création ou patch). N'écrit que les clés présentes ;
+ * jamais Quantité / Prix de revient (rollups), Plus-value / % (formules) ni les champs « script ».
+ * `null` vide un champ optionnel ; sur un champ obligatoire (nom, classe, devise, mode) il est ignoré.
+ * Types alignés sur la base créée par `setup.ts` : Sous-type en texte, Établissement en select.
+ */
+export function assetInputToProperties(a: Patch<AssetInput>): NotionProps {
+  const p = P.assets;
+  const props: NotionProps = {};
+  if (a.name != null) props[p.name] = w.title(a.name);
+  if (a.assetClass != null) props[p.assetClass] = w.sel(a.assetClass);
+  if (a.subtype !== undefined) props[p.subtype] = w.text(a.subtype ?? undefined);
+  if (a.institution !== undefined) props[p.institution] = w.sel(a.institution ?? undefined);
+  if (a.currency != null) props[p.currency] = w.sel(a.currency);
+  if (a.mode != null) props[p.mode] = w.sel(a.mode === 'manual' ? OPT.mode.manual : OPT.mode.auto);
+  if (a.quoteId !== undefined) props[p.quoteId] = w.text(a.quoteId ?? undefined);
+  if (a.manualValue !== undefined) props[p.manualValue] = w.num(a.manualValue);
+  if (a.manualValueDate !== undefined) props[p.manualValueDate] = w.date(a.manualValueDate ?? undefined);
+  if (a.fixedMonthly !== undefined) props[p.fixedMonthly] = w.num(a.fixedMonthly);
+  if (a.archived !== undefined) props[p.archived] = w.chk(a.archived === true);
+  return props;
+}
+
 // ---------------------------------------------------------------------------
 // Mouvements (§4.2)
 
@@ -225,6 +251,21 @@ export function debtToProperties(d: Omit<Debt, 'id'>): NotionProps {
   };
 }
 
+/** Propriétés d'entrée d'un crédit (jamais Valeur €). Mêmes règles que `assetInputToProperties`. */
+export function debtInputToProperties(d: Patch<DebtInput>): NotionProps {
+  const p = P.debts;
+  const props: NotionProps = {};
+  if (d.name != null) props[p.name] = w.title(d.name);
+  if (d.type !== undefined) props[p.type] = w.sel(d.type ?? undefined);
+  if (d.currency != null) props[p.currency] = w.sel(d.currency);
+  if (d.outstanding != null) props[p.outstanding] = w.num(d.outstanding);
+  if (d.rate !== undefined) props[p.rate] = w.num(d.rate);
+  if (d.monthly !== undefined) props[p.monthly] = w.num(d.monthly);
+  if (d.endDate !== undefined) props[p.endDate] = w.date(d.endDate ?? undefined);
+  if (d.financedAssetId !== undefined) props[p.financedAsset] = w.rel(d.financedAssetId ?? undefined);
+  return props;
+}
+
 // ---------------------------------------------------------------------------
 // Budget (§4.4)
 
@@ -271,16 +312,31 @@ function parseZone(label: string, share: number | undefined, range: string | und
   return { label, min, max, goldShare: round(share / 100) };
 }
 
-export function rowsToStrategy(pages: NotionPage[]): Strategy {
+/** Page Notion -> ligne neutre. */
+export function pageToStrategyRow(page: NotionPage): StrategyRow {
   const p = P.strategy;
+  const row: StrategyRow = { key: readTitle(page, p.key).trim() };
+  const value = readNumber(page, p.value);
+  const text = readText(page, p.text);
+  const asset = readRelation(page, p.asset);
+  if (value !== undefined) row.value = value;
+  if (text !== undefined) row.text = text;
+  if (asset !== undefined) row.assetId = asset;
+  return row;
+}
+
+export function rowsToStrategy(pages: NotionPage[]): Strategy {
+  return strategyFromRows(pages.map(pageToStrategyRow));
+}
+
+/** Lignes neutres -> Strategy (partagé par la lecture Notion et le FakeRepo). */
+export function strategyFromRows(rows: StrategyRow[]): Strategy {
   const s: Strategy = { targets: {}, mainAssetByClass: {}, monthlyInvest: 0, metalGrid: [], displayCurrency: 'EUR' };
   const zones: MetalZone[] = [];
   const unreadable: string[] = [];
 
-  for (const page of pages) {
-    const key = readTitle(page, p.key).trim();
-    const value = readNumber(page, p.value);
-    const asset = readRelation(page, p.asset);
+  for (const row of rows) {
+    const { key, value, assetId: asset } = row;
 
     if (key.startsWith(STRATEGY_KEY.targetPrefix)) {
       const cls = asAssetClass(key.slice(STRATEGY_KEY.targetPrefix.length).trim());
@@ -288,7 +344,7 @@ export function rowsToStrategy(pages: NotionPage[]): Strategy {
       if (value !== undefined) s.targets[cls] = round(value / 100);
       if (asset) s.mainAssetByClass[cls] = asset;
     } else if (key.startsWith(STRATEGY_KEY.zonePrefix)) {
-      const zone = parseZone(key.slice(STRATEGY_KEY.zonePrefix.length).trim(), value, readText(page, p.text));
+      const zone = parseZone(key.slice(STRATEGY_KEY.zonePrefix.length).trim(), value, row.text);
       if (zone) zones.push(zone);
       else unreadable.push(key.slice(STRATEGY_KEY.zonePrefix.length).trim());
     } else if (key === STRATEGY_KEY.gold) {
@@ -300,7 +356,7 @@ export function rowsToStrategy(pages: NotionPage[]): Strategy {
     } else if (key === STRATEGY_KEY.monthlyInvest) {
       if (value !== undefined) s.monthlyInvest = value;
     } else if (key === STRATEGY_KEY.displayCurrency) {
-      const c = asCurrency(readText(page, p.text)?.trim());
+      const c = asCurrency(row.text?.trim());
       if (c) s.displayCurrency = c;
     }
     // Clé inconnue : ignorée.
@@ -346,6 +402,20 @@ export function strategyRowToProperties(r: StrategyRow): NotionProps {
     [p.text]: w.text(r.text),
     [p.asset]: w.rel(r.assetId),
   };
+}
+
+/**
+ * Écriture d'une clé Stratégie : `value` / `text` / `assetId` absents = inchangés, `null` = vidés.
+ * Le titre (la clé) n'est écrit qu'à la création.
+ */
+export function strategyEntryToProperties(e: StrategyEntryInput, creating: boolean): NotionProps {
+  const p = P.strategy;
+  const props: NotionProps = {};
+  if (creating) props[p.key] = w.title(e.key);
+  if (e.value !== undefined) props[p.value] = w.num(e.value);
+  if (e.text !== undefined) props[p.text] = w.text(e.text ?? undefined);
+  if (e.assetId !== undefined) props[p.asset] = w.rel(e.assetId ?? undefined);
+  return props;
 }
 
 // ---------------------------------------------------------------------------

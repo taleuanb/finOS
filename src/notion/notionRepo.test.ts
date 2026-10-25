@@ -142,6 +142,83 @@ describe('createNotionRepo', () => {
   });
 });
 
+describe('écriture : actifs, crédits, Stratégie', () => {
+  it('createAsset crée dans Actifs avec les propriétés d\'entrée seulement et renvoie l\'id', async () => {
+    const { client, creates } = fakeClient();
+    const id = await createNotionRepo(client, ids).createAsset({
+      name: 'Livret', assetClass: 'Épargne', currency: 'MAD', mode: 'manual', manualValue: 1000, manualValueDate: '2026-10-25', institution: 'LCL', subtype: 'Livret',
+    });
+    expect(id).toBe('new-1');
+    expect(creates[0].parent).toEqual({ type: 'data_source_id', data_source_id: 'ds-assets' });
+    expect(creates[0].properties['Valeur manuelle']).toEqual({ number: 1000 });
+    expect(creates[0].properties['Établissement']).toEqual({ select: { name: 'LCL' } });
+    expect(creates[0].properties).not.toHaveProperty('Quantité');
+    expect(creates[0].properties).not.toHaveProperty('Valeur €');
+  });
+  it("updateAsset n'écrit que le patch (null efface) sur la bonne page", async () => {
+    const { client, updates } = fakeClient();
+    await createNotionRepo(client, ids).updateAsset('a1', { manualValue: 5, institution: null, archived: true });
+    expect(updates).toEqual([{ page_id: 'a1', properties: {
+      'Valeur manuelle': { number: 5 }, 'Établissement': { select: null }, 'Archivé': { checkbox: true },
+    } }]);
+  });
+  it('createDebt / updateDebt écrivent dans Dettes ; deleteDebt met en corbeille', async () => {
+    const { client, creates, updates } = fakeClient();
+    const repo = createNotionRepo(client, ids);
+    const id = await repo.createDebt({ name: 'Crédit', currency: 'EUR', outstanding: 100, financedAssetId: 'a1' });
+    await repo.updateDebt('d1', { outstanding: 90, financedAssetId: null });
+    await repo.deleteDebt('d1');
+    expect(id).toBe('new-1');
+    expect(creates[0].parent).toEqual({ type: 'data_source_id', data_source_id: 'ds-debts' });
+    expect(creates[0].properties['Actif financé']).toEqual({ relation: [{ id: 'a1' }] });
+    expect(updates[0]).toEqual({ page_id: 'd1', properties: { 'Capital restant dû': { number: 90 }, 'Actif financé': { relation: [] } } });
+    expect(updates[1]).toEqual({ page_id: 'd1', in_trash: true });
+  });
+  it('setStrategyEntry met à jour la clé existante au lieu de créer', async () => {
+    const { client, queries, creates, updates } = fakeClient({ 'ds-strategy': [strategyRows] });
+    await createNotionRepo(client, ids).setStrategyEntry({ key: 'cible:Crypto', value: 15 });
+    expect(queries[0].filter).toEqual({ property: 'Clé', title: { equals: 'cible:Crypto' } });
+    expect(creates).toHaveLength(0);
+    expect(updates).toEqual([{ page_id: 's0000000-0000-4000-8000-000000000001', properties: { 'Valeur': { number: 15 } } }]);
+  });
+  it("setStrategyEntry crée la ligne quand la clé n'existe pas", async () => {
+    const { client, creates, updates } = fakeClient({ 'ds-strategy': [[]] });
+    await createNotionRepo(client, ids).setStrategyEntry({ key: 'devise_affichage', text: 'MAD' });
+    expect(updates).toHaveLength(0);
+    expect(creates[0].parent).toEqual({ type: 'data_source_id', data_source_id: 'ds-strategy' });
+    expect(creates[0].properties).toEqual({
+      'Clé': { title: [{ text: { content: 'devise_affichage' } }] }, 'Texte': { rich_text: [{ text: { content: 'MAD' } }] },
+    });
+  });
+  it('deleteStrategyEntry met la page en corbeille, sans effet si la clé est absente', async () => {
+    const hit = fakeClient({ 'ds-strategy': [strategyRows] });
+    await createNotionRepo(hit.client, ids).deleteStrategyEntry('actif:or');
+    expect(hit.updates).toEqual([{ page_id: 's0000000-0000-4000-8000-000000000003', in_trash: true }]);
+    const miss = fakeClient({ 'ds-strategy': [[]] });
+    await createNotionRepo(miss.client, ids).deleteStrategyEntry('inconnue');
+    expect(miss.updates).toHaveLength(0);
+    expect(miss.creates).toHaveLength(0);
+  });
+  it('les requêtes de clé filtrent côté Notion (pas de lecture de toute la base)', async () => {
+    const { client, queries } = fakeClient({ 'ds-strategy': [[]] });
+    await createNotionRepo(client, ids).deleteStrategyEntry('x');
+    expect(queries).toHaveLength(1);
+    expect(queries[0].filter).toEqual({ property: 'Clé', title: { equals: 'x' } });
+  });
+  it('toutes les écritures passent par limit', async () => {
+    const { client } = fakeClient({ 'ds-strategy': [[]] });
+    const spy = vi.fn((fn: () => Promise<unknown>) => fn());
+    const repo = createNotionRepo(client, ids, spy as unknown as Limit);
+    await repo.createAsset({ name: 'a', assetClass: 'Autres', currency: 'EUR', mode: 'manual' });
+    await repo.updateAsset('a', { name: 'b' });
+    await repo.createDebt({ name: 'd', currency: 'EUR', outstanding: 1 });
+    await repo.updateDebt('d', { outstanding: 2 });
+    await repo.deleteDebt('d');
+    await repo.setStrategyEntry({ key: 'k', value: 1 }); // requête + création
+    expect(spy).toHaveBeenCalledTimes(7);
+  });
+});
+
 describe('compatibilité avec le vrai client', () => {
   it('Client de @notionhq/client est assignable à NotionClientLike (vérifié par tsc)', () => {
     const real = new Client({ auth: 'secret-test' });

@@ -1,9 +1,9 @@
 import type { Client } from '@notionhq/client';
 import type { Asset, BudgetLine, Debt, Movement, PlanLine, Snapshot, Strategy } from '@/domain/types';
 import {
-  budgetLineToProperties, movementToProperties, pageToAsset, pageToBudgetLine, pageToDebt, pageToMovement,
-  pageToPlanLine, pageToSnapshot, planLineToProperties, rowsToStrategy, snapshotToProperties,
-  valuationToProperties, type NotionPage, type NotionProps,
+  assetInputToProperties, budgetLineToProperties, debtInputToProperties, movementToProperties, pageToAsset, pageToBudgetLine, pageToDebt, pageToMovement,
+  pageToPlanLine, pageToSnapshot, pageToStrategyRow, planLineToProperties, rowsToStrategy, snapshotToProperties,
+  strategyEntryToProperties, valuationToProperties, type NotionPage, type NotionProps,
 } from './mappers';
 import type { Repo } from './repo';
 import { DB, P } from './schema';
@@ -72,6 +72,14 @@ export function createNotionRepo(client: NotionClientLike, ids: Record<keyof typ
     await limit(() => client.pages.update({ page_id: pageId, properties }));
   };
 
+  const trash = async (pageId: string): Promise<void> => {
+    await limit(() => client.pages.update({ page_id: pageId, in_trash: true }));
+  };
+  /** Pages Stratégie dont la clé est exactement `key` (filtre Notion + garde-fou côté client). */
+  const strategyPages = async (key: string): Promise<NotionPage[]> =>
+    (await queryAll(ids.strategy, { filter: { property: P.strategy.key, title: { equals: key } } }))
+      .filter((page) => pageToStrategyRow(page).key === key.trim());
+
   return {
     async listAssets(): Promise<Asset[]> {
       return (await queryAll(ids.assets)).map(pageToAsset);
@@ -126,10 +134,34 @@ export function createNotionRepo(client: NotionClientLike, ids: Record<keyof typ
       return create(ids.budget, properties);
     },
     async deleteBudgetLine(id) {
-      await limit(() => client.pages.update({ page_id: id, in_trash: true }));
+      await trash(id);
     },
     async createPlanLines(lines) {
       for (const line of lines) await create(ids.plan, planLineToProperties(line));
+    },
+
+    async createAsset(a) {
+      return create(ids.assets, assetInputToProperties(a));
+    },
+    async updateAsset(id, patch) {
+      await update(id, assetInputToProperties(patch));
+    },
+    async createDebt(d) {
+      return create(ids.debts, debtInputToProperties(d));
+    },
+    async updateDebt(id, patch) {
+      await update(id, debtInputToProperties(patch));
+    },
+    async deleteDebt(id) {
+      await trash(id);
+    },
+    async setStrategyEntry(e) {
+      const [existing] = await strategyPages(e.key);
+      if (existing) await update(existing.id, strategyEntryToProperties(e, false));
+      else await create(ids.strategy, strategyEntryToProperties(e, true));
+    },
+    async deleteStrategyEntry(key) {
+      for (const page of await strategyPages(key)) await trash(page.id);
     },
   };
 }

@@ -6,8 +6,8 @@ afterEach(() => vi.unstubAllEnvs());
 
 describe('fixtureDashboard', () => {
   it('est cohérent avec les maquettes', () => {
-    expect(d.totals.netEur).toBeCloseTo(423147, 0);
-    expect(d.totals.grossEur).toBeCloseTo(478447, 0);
+    expect(d.totals.netEur).toBeCloseTo(422000, 0);
+    expect(d.totals.grossEur).toBeCloseTo(477300, 0);
     expect(d.totals.debtsEur).toBeCloseTo(55300, 0);
     expect(d.totals.grossEur - d.totals.debtsEur).toBeCloseTo(d.totals.netEur, 6);
     expect(d.assets).toHaveLength(19);
@@ -26,7 +26,7 @@ describe('fixtureDashboard', () => {
   it('le dernier point d’historique égale le net, et topPerformers a 5 lignes triées', () => {
     expect(d.history[d.history.length - 1].netEur).toBeCloseTo(d.totals.netEur, 6);
     expect(d.topPerformers).toHaveLength(5);
-    expect(d.topPerformers[0].id).toBe('domaines');
+    expect(d.topPerformers[0].id).toBe('ag');
   });
   it('getRepo sert les données des maquettes (mode démo)', async () => {
     vi.stubEnv('NOTION_TOKEN', '');

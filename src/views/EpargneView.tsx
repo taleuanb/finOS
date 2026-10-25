@@ -405,14 +405,14 @@ function Simulator({ data }: { data: Dashboard }) {
     try {
       const lines = allocate({
         amount: Math.round(parsed), months: mode === 'yearly' ? 12 : 1,
-        assets: data.assets, strategy: data.strategy, ratio: data.metals.ratio,
+        assets: data.assets, strategy: data.strategy, ratio: data.metals.ratio, fx: data.fx,
       });
       return { lines };
     } catch (e) {
       if (e instanceof AllocationError) return { error: e.message };
       throw e;
     }
-  }, [amount, mode, data.assets, data.strategy, data.metals.ratio]);
+  }, [amount, mode, data.assets, data.strategy, data.metals.ratio, data.fx]);
 
   function changeMode(next: SimMode) {
     setMode(next);

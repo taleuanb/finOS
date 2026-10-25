@@ -164,6 +164,38 @@ describe('updateAssetWith', () => {
     expect(spy).toHaveBeenCalledWith('lcl', { name: 'Nouveau' });
   });
 
+  it('refuse un archivage par la modification (seul « Archiver » archive, avec la garde Stratégie)', async () => {
+    const spy = vi.spyOn(repo, 'updateAsset');
+    for (const archived of [true, false]) {
+      expect(await updateAssetWith(repo, 'hsbc', { archived }, NOW)).toEqual({
+        ok: false, error: 'Pour archiver un actif, utilise le bouton « Archiver ».',
+      });
+    }
+    expect(await updateAssetWith(repo, 'lcl', { name: 'Nouveau', archived: true }, NOW)).toMatchObject({ ok: false });
+    expect(spy).not.toHaveBeenCalled();
+    expect((await repo.listAssets()).find((a) => a.id === 'hsbc')!.archived).toBe(false);
+  });
+
+  it.each([
+    ['or', 'Fonds & ETF'], ['ag', 'Autres'], ['epargne', 'Comptes courants'], ['hsbc', 'Crypto'], ['syla', 'Autres'],
+  ])('refuse de changer la classe de %s, utilisé par la Stratégie', async (id, assetClass) => {
+    const spy = vi.spyOn(repo, 'updateAsset');
+    expect(await updateAssetWith(repo, id, { assetClass }, NOW)).toEqual({
+      ok: false, error: 'Cet actif est utilisé par ta Stratégie : change-le d’abord dans Stratégie avant de changer sa classe.',
+    });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('un actif utilisé par la Stratégie reste modifiable sans changer de classe (classe identique comprise)', async () => {
+    expect(await updateAssetWith(repo, 'hsbc', { name: 'HSBC Global', assetClass: 'Fonds & ETF' }, NOW)).toEqual({ ok: true });
+    expect((await repo.listAssets()).find((a) => a.id === 'hsbc')).toMatchObject({ name: 'HSBC Global', assetClass: 'Fonds & ETF' });
+  });
+
+  it('un actif hors Stratégie peut changer de classe', async () => {
+    expect(await updateAssetWith(repo, 'kunto', { assetClass: 'Autres' }, NOW)).toEqual({ ok: true });
+    expect((await repo.listAssets()).find((a) => a.id === 'kunto')!.assetClass).toBe('Autres');
+  });
+
   it("erreur générique et journalisation si Notion échoue", async () => {
     vi.spyOn(repo, 'updateAsset').mockRejectedValue(new Error('boom-detail'));
     const res = await updateAssetWith(repo, 'lcl', { name: 'Nouveau' }, NOW);

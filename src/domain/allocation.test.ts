@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { allocate } from './allocation';
 import { AllocationError, DEFAULT_METAL_GRID } from './types';
-import type { AllocationLine, Asset, AssetClass, Strategy } from './types';
+import type { AllocationLine, Asset, AssetClass, FxRates, Strategy } from './types';
 
 function asset(id: string, assetClass: AssetClass, valueEur: number, extra: Partial<Asset> = {}): Asset {
   return {
@@ -17,11 +17,13 @@ function strategy(over: Partial<Strategy>): Strategy {
   };
 }
 
+const FX: FxRates = { date: '2026-10-25', EUR: 1, MAD: 10.85, USD: 1.08, GBP: 0.84 };
+
 const byAsset = (lines: AllocationLine[]) => Object.fromEntries(lines.map((l) => [l.assetId, l.amount]));
 const sum = (lines: AllocationLine[]) => lines.reduce((s, l) => s + l.amount, 0);
 
 const A = {
-  amount: 200,
+  fx: FX, amount: 200,
   ratio: 57,
   assets: [
     asset('etf', 'Fonds & ETF', 400),
@@ -37,7 +39,7 @@ const A = {
 };
 
 const B = {
-  amount: 600,
+  fx: FX, amount: 600,
   ratio: 40,
   assets: [asset('etf', 'Fonds & ETF', 400), asset('or', 'Métaux précieux', 0), asset('ag', 'Métaux précieux', 0)],
   strategy: strategy({
@@ -74,7 +76,7 @@ describe('allocate', () => {
 
   it('cas C : versement fixe seul', () => {
     const lines = allocate({
-      amount: 100, ratio: null,
+      fx: FX, amount: 100, ratio: null,
       assets: [asset('per', 'PER', 1000, { fixedMonthly: 100 })],
       strategy: strategy({}),
     });
@@ -83,7 +85,7 @@ describe('allocate', () => {
 
   it('cas D : annuel, le versement fixe est multiplié par 12', () => {
     const lines = allocate({
-      amount: 2400, months: 12, ratio: null,
+      fx: FX, amount: 2400, months: 12, ratio: null,
       assets: [asset('per', 'PER', 300, { fixedMonthly: 100 }), asset('etf', 'Fonds & ETF', 400)],
       strategy: strategy({ targets: { 'Fonds & ETF': 1 }, mainAssetByClass: { 'Fonds & ETF': 'etf' } }),
     });
@@ -93,7 +95,7 @@ describe('allocate', () => {
 
   it('le versement fixe est plafonné à M', () => {
     const lines = allocate({
-      amount: 80, ratio: null,
+      fx: FX, amount: 80, ratio: null,
       assets: [asset('per', 'PER', 0, { fixedMonthly: 100 })],
       strategy: strategy({}),
     });
@@ -115,7 +117,7 @@ describe('allocate', () => {
 
   it('classe ciblée sans actif principal : AllocationError lisible', () => {
     const noMain = {
-      amount: 100, ratio: null,
+      fx: FX, amount: 100, ratio: null,
       assets: [asset('etf', 'Fonds & ETF', 100), asset('btc', 'Crypto', 0)],
       strategy: strategy({
         targets: { 'Fonds & ETF': 0.5, Crypto: 0.5 },
@@ -128,7 +130,7 @@ describe('allocate', () => {
 
   it('actif principal archivé : AllocationError', () => {
     const archived = {
-      amount: 100, ratio: null,
+      fx: FX, amount: 100, ratio: null,
       assets: [asset('btc', 'Crypto', 0, { archived: true })],
       strategy: strategy({ targets: { Crypto: 1 }, mainAssetByClass: { Crypto: 'btc' } }),
     };
@@ -143,7 +145,7 @@ describe('allocate', () => {
 
   it('fusionne la ligne fixe et la ligne cible d’un même actif', () => {
     const lines = allocate({
-      amount: 200, ratio: null,
+      fx: FX, amount: 200, ratio: null,
       assets: [asset('per', 'PER', 0, { fixedMonthly: 50 })],
       strategy: strategy({ targets: { PER: 1 }, mainAssetByClass: { PER: 'per' } }),
     });
@@ -180,7 +182,7 @@ describe('allocate — arrondi au centime (Σ === M)', () => {
 
   it('aucune cible définie et un reste à répartir : AllocationError lisible', () => {
     const noTarget = {
-      amount: 300, ratio: null,
+      fx: FX, amount: 300, ratio: null,
       assets: [asset('per', 'PER', 0, { fixedMonthly: 100 }), asset('etf', 'Fonds & ETF', 0)],
       strategy: strategy({ mainAssetByClass: { 'Fonds & ETF': 'etf' } }),
     };
@@ -189,8 +191,57 @@ describe('allocate — arrondi au centime (Σ === M)', () => {
 
   it('cibles toutes à 0 : AllocationError', () => {
     expect(() => allocate({
-      amount: 300, ratio: null, assets: [asset('etf', 'Fonds & ETF', 0)],
+      fx: FX, amount: 300, ratio: null, assets: [asset('etf', 'Fonds & ETF', 0)],
       strategy: strategy({ targets: { 'Fonds & ETF': 0 }, mainAssetByClass: { 'Fonds & ETF': 'etf' } }),
+    })).toThrow(new AllocationError('Aucune cible définie dans la Stratégie'));
+  });
+});
+
+describe('allocate — versement fixe dans la devise de l’actif', () => {
+  it('un versement fixe de 1 000 MAD consomme ≈ 92,17 € (et non 1 000 €)', () => {
+    const lines = allocate({
+      fx: FX, amount: 500, ratio: null,
+      assets: [asset('mad', 'PER', 0, { currency: 'MAD', fixedMonthly: 1000 }), asset('etf', 'Fonds & ETF', 0)],
+      strategy: strategy({ targets: { 'Fonds & ETF': 1 }, mainAssetByClass: { 'Fonds & ETF': 'etf' } }),
+    });
+    expect(byAsset(lines)).toEqual({ mad: 92.17, etf: 407.83 });
+    expect(Math.round(sum(lines) * 100)).toBe(50000);
+  });
+
+  it('annuel : 12 × 100 USD convertis en euros', () => {
+    const lines = allocate({
+      fx: FX, amount: 5000, months: 12, ratio: null,
+      assets: [asset('usd', 'PER', 0, { currency: 'USD', fixedMonthly: 100 })],
+      strategy: strategy({ targets: { PER: 1 }, mainAssetByClass: { PER: 'usd' } }),
+    });
+    expect(lines).toHaveLength(1);
+    expect(lines[0].amount).toBe(5000);
+    const fixedOnly = allocate({
+      fx: FX, amount: 1111.11, months: 12, ratio: null,
+      assets: [asset('usd', 'PER', 0, { currency: 'USD', fixedMonthly: 100 })],
+      strategy: strategy({}),
+    });
+    expect(byAsset(fixedOnly)).toEqual({ usd: 1111.11 });
+  });
+});
+
+describe('allocate — seules les classes pilotables comptent', () => {
+  it('une cible Épargne ou Immobilier stockée est ignorée (aucune erreur, aucune part)', () => {
+    const lines = allocate({
+      fx: FX, amount: 300, ratio: null,
+      assets: [asset('etf', 'Fonds & ETF', 0), asset('ep', 'Épargne', 0), asset('immo', 'Immobilier', 0)],
+      strategy: strategy({
+        targets: { 'Fonds & ETF': 0.5, Épargne: 0.3, Immobilier: 0.2 },
+        mainAssetByClass: { 'Fonds & ETF': 'etf' },
+      }),
+    });
+    expect(byAsset(lines)).toEqual({ etf: 300 });
+  });
+
+  it('seules des cibles non pilotables : « Aucune cible définie »', () => {
+    expect(() => allocate({
+      fx: FX, amount: 300, ratio: null, assets: [asset('ep', 'Épargne', 0)],
+      strategy: strategy({ targets: { Épargne: 1 }, mainAssetByClass: { Épargne: 'ep' } }),
     })).toThrow(new AllocationError('Aucune cible définie dans la Stratégie'));
   });
 });

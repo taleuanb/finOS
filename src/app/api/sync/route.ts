@@ -24,7 +24,9 @@ async function handle(): Promise<Response> {
       now: new Date(),
     });
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : String(e) }, { status: 500 });
+    // Le détail reste dans les journaux du serveur ; le client ne reçoit qu'un message générique.
+    console.error('Synchronisation impossible', e);
+    return NextResponse.json({ error: 'erreur interne, réessaie dans un instant' }, { status: 500 });
   } finally {
     // Invalidation même si la synchro échoue tard (des actifs ont pu être écrits). Elle n'écrit que les valorisations
     // (actifs), les cours spot (mouvements) et la photo du jour (historique).

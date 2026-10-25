@@ -139,4 +139,17 @@ describe('actions budget : invalidation du cache de la base Budget seulement', (
     expect((await reorderBudget(['b-charges', 'b-loyer'])).ok).toBe(true);
     expect(revalidateNotion).toHaveBeenCalledWith('budget');
   });
+
+  it('reorderBudget : une écriture qui échoue en cours de route invalide quand même le budget (écritures partielles)', async () => {
+    let calls = 0;
+    const upsert = current.upsertBudgetLine.bind(current);
+    vi.spyOn(current, 'upsertBudgetLine').mockImplementation(async (l) => {
+      if (++calls === 2) throw new Error('notion down');
+      return upsert(l);
+    });
+    const res = await reorderBudget(['b-charges', 'b-loyer', 'b-courses']);
+    expect(res).toEqual({ ok: false, error: 'Réorganisation impossible, réessaie dans un instant.' });
+    expect(revalidateNotion).toHaveBeenCalledTimes(1);
+    expect(revalidateNotion).toHaveBeenCalledWith('budget');
+  });
 });

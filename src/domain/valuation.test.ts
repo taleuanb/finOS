@@ -59,6 +59,17 @@ describe('valueAsset', () => {
     expect(r.unitPrice).toBeUndefined();
   });
 
+  it('auto sans cotation mais avec un dernier cours : quantité × cours (devise de l’actif)', () => {
+    const r = valueAsset({ ...etf, currency: 'USD', quantity: 14, unitPrice: 50, value: 500 }, undefined, fx);
+    expect(r).toEqual({ unitPrice: 50, value: 700, valueEur: 700 / 1.08 });
+  });
+
+  it('métal sans cotation mais avec un dernier cours €/kg : grammes × cours ÷ 1000', () => {
+    const r = valueAsset({ ...gold, currency: 'MAD', quantity: 10, unitPrice: 120_000, value: 0 }, undefined, fx);
+    expect(r.valueEur).toBeCloseTo(1_200, 9);
+    expect(r.value).toBeCloseTo(1_200 * 10.85, 6);
+  });
+
   it('auto sans cotation ni valeur connue : 0', () => {
     expect(valueAsset(etf, undefined, fx)).toMatchObject({ value: 0, valueEur: 0 });
   });

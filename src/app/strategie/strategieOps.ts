@@ -1,16 +1,13 @@
-import { ASSET_CLASSES, type Asset, type AssetClass } from '@/domain/types';
+import { PILOTABLE_CLASSES, type Asset, type AssetClass } from '@/domain/types';
 import type { Repo } from '@/notion/repo';
 import { STRATEGY_KEY } from '@/notion/schema';
 
 // Module ordinaire (hors 'use server') : ces fonctions ne sont pas exposées comme actions serveur.
-// Elles n'invalident aucun cache : c'est le rôle de `actions.ts`, seulement en cas de succès.
+// Elles n'invalident aucun cache : c'est le rôle de `actions.ts` (en cas de succès, ou d'écritures partielles).
 
 export type ActionResult = { ok: true } | { ok: false; error: string };
 
-/** Classes que le plan peut piloter par une cible (les autres ne sont pas investissables par le plan). */
-export const PILOTABLE_CLASSES: readonly AssetClass[] = ASSET_CLASSES.filter(
-  (c) => c !== 'Épargne' && c !== 'Comptes courants' && c !== 'Immobilier' && c !== 'Autres',
-);
+export { PILOTABLE_CLASSES };
 
 const METALS: AssetClass = 'Métaux précieux';
 const SAVINGS: AssetClass = 'Épargne';

@@ -97,10 +97,14 @@ describe('/api/sync', () => {
     expect(getDashboard).not.toHaveBeenCalled();
   });
 
-  it('500 si runSync lui-même lève', async () => {
-    runSync.mockRejectedValue(new Error('Notion indisponible'));
+  it('500 si runSync lui-même lève : erreur journalisée, message générique (jamais le détail)', async () => {
+    const boom = new Error('Notion indisponible : token ntn_secret');
+    runSync.mockRejectedValue(boom);
     const res = await GET();
     expect(res.status).toBe(500);
-    expect(await res.json()).toEqual({ error: 'Notion indisponible' });
+    const body = await res.json();
+    expect(body).toEqual({ error: 'erreur interne, réessaie dans un instant' });
+    expect(JSON.stringify(body)).not.toContain('Notion indisponible');
+    expect(console.error).toHaveBeenCalledWith(expect.any(String), boom);
   });
 });

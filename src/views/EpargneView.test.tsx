@@ -480,7 +480,7 @@ describe('EpargneView — proposition : cas limites', () => {
 describe('EpargneView — proposition non modifiée avec des centimes (I1)', () => {
   it.each([769.75, 900])('M = %s € : la proposition brute de allocate() est validable telle quelle', (m) => {
     const assets = fixtureDashboard.assets.map((a) => (a.id === 'per' && m === 900 ? { ...a, fixedMonthly: 100.5 } : a));
-    const lines = allocate({ amount: m, assets, strategy: fixtureDashboard.strategy, ratio: fixtureDashboard.metals.ratio });
+    const lines = allocate({ amount: m, assets, strategy: fixtureDashboard.strategy, ratio: fixtureDashboard.metals.ratio, fx: fixtureDashboard.fx });
     renderView({
       ...unvalidated({ proposal: lines }), assets,
       budget: { ...fixtureDashboard.budget, investEur: m },

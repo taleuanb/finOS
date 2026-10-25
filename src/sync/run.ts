@@ -115,14 +115,25 @@ export async function runSync(d: {
   const current = new Map(active.map((a) => [a.id, a]));
   let updated = 0;
 
+  /**
+   * Repli sans nouveau cours : quantité des mouvements × dernier cours connu (même calcul que le tableau de bord,
+   * pour que l'instantané concorde avec les totaux affichés) ; sans cours connu (ou pour l'Épargne, dont le solde
+   * estimé n'a pas pu être calculé), dernière valeur enregistrée.
+   */
+  const fallbackOf = (a: Asset): { unitPrice?: number; value: number; valueEur: number } => {
+    const stored = { unitPrice: a.unitPrice, value: a.value ?? 0, valueEur: a.valueEur ?? 0 };
+    if (a.id === savingsId) return stored;
+    const v = valueAsset(a, undefined, fx);
+    return Number.isFinite(v.value) && Number.isFinite(v.valueEur) ? { unitPrice: a.unitPrice, value: v.value, valueEur: v.valueEur } : stored;
+  };
+
   const markFailed = async (a: Asset, e: unknown) => {
     errors.push({ assetId: a.id, message: asError(e).message });
     valuationIncomplete = true;
+    const fallback = fallbackOf(a);
+    current.set(a.id, { ...a, ...fallback });
     try {
-      await repo.updateAssetValuation(a.id, {
-        unitPrice: a.unitPrice, value: a.value ?? 0, valueEur: a.valueEur ?? 0,
-        syncStatus: warn(e), lastUpdate: a.lastUpdate ?? nowIso,
-      });
+      await repo.updateAssetValuation(a.id, { ...fallback, syncStatus: warn(e), lastUpdate: a.lastUpdate ?? nowIso });
     } catch {
       // Écriture du statut impossible aussi : l'erreur est déjà dans le rapport.
     }
@@ -191,7 +202,7 @@ export async function runSync(d: {
     ? goldSilverRatio(usdPerOzToEurPerKg(gold.price, fx), usdPerOzToEurPerKg(silver.price, fx))
     : null;
 
-  // Instantané du jour : valeurs réellement en base (ancienne valeur si l'écriture a échoué).
+  // Instantané du jour : valeurs calculées (repli quantité × dernier cours pour un actif en échec).
   const debtsEur = debts.map((x) => ({ ...x, valueEur: toEur(x.outstanding, x.currency, fx) }));
   try {
     await repo.upsertSnapshot(buildSnapshot(date, [...current.values()], debtsEur, fx, ratio, valuationIncomplete));

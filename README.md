@@ -80,7 +80,7 @@ npx tsx --env-file=.env.local scripts/import-metals.ts autre.csv  # ou un autre 
    | `SESSION_SECRET` | Secret de signature du cookie de session (32 caractères minimum) |
    | `CRON_SECRET` | Secret accepté par `/api/sync` pour le cron |
 
-   Les actifs, leurs mouvements et les crédits se créent et se modifient directement dans l'écran **Patrimoine** (bouton **Ajouter**, toucher d'une ligne pour la modifier ; plus besoin de passer par Notion, ni de lien vers la base Actifs).
+   Les actifs et les crédits se créent et se modifient directement dans l'écran **Patrimoine** (bouton **Ajouter**, toucher d'une ligne pour la modifier) ; les mouvements (achats, ventes) y sont ajoutés depuis la fiche d'un actif (**Ajouter un mouvement**). Plus besoin de passer par Notion, ni de lien vers la base Actifs ; seule la correction d'un mouvement déjà enregistré se fait encore dans Notion.
 
 3. Déployer. Le fichier `vercel.json` programme un cron qui appelle `/api/sync` **tous les jours à 05:00 UTC**. Quand `CRON_SECRET` est défini, Vercel l'envoie automatiquement dans l'en-tête `Authorization: Bearer <CRON_SECRET>`, que le middleware accepte pour cette seule route.
 4. Sur le plan **Hobby**, un cron ne peut s'exécuter qu'**une fois par jour**.

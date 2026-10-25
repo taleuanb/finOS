@@ -35,6 +35,7 @@ const ASSET_NOT_FOUND = 'Actif introuvable';
 const DEBT_NOT_FOUND = 'Crédit introuvable';
 const SAVE_ERROR = 'Enregistrement impossible, réessaie dans un instant.';
 const DELETE_ERROR = 'Suppression impossible, réessaie dans un instant.';
+const ARCHIVE_VIA_BUTTON = 'Pour archiver un actif, utilise le bouton « Archiver ».';
 
 type Parsed<T> = { ok: true; value: T } | { ok: false; error: string };
 const bad = (error: string): { ok: false; error: string } => ({ ok: false, error });
@@ -173,9 +174,17 @@ export async function createAssetWith(repo: Repo, input: unknown, now: Date = ne
   }
 }
 
+/** Identifiants d'actifs désignés par la Stratégie (or, argent, épargne, actif principal d'une classe). */
+async function strategyAssetIds(repo: Repo): Promise<(string | undefined)[]> {
+  const strategy = await repo.getStrategy();
+  return [strategy.goldAssetId, strategy.silverAssetId, strategy.savingsAssetId, ...Object.values(strategy.mainAssetByClass)];
+}
+
 export async function updateAssetWith(repo: Repo, id: unknown, patch: unknown, now: Date = new Date()): Promise<ActionResult> {
   if (typeof id !== 'string' || !id) return bad(ASSET_NOT_FOUND);
   if (!isObject(patch)) return bad('Données invalides');
+  // L'archivage passe uniquement par archiveAssetWith, qui protège les actifs utilisés par la Stratégie.
+  if (patch.archived !== undefined) return bad(ARCHIVE_VIA_BUTTON);
   try {
     // L'id vient du client : il doit désigner un actif de la base Actifs, jamais une autre page Notion.
     const existing = (await repo.listAssets()).find((a) => a.id === id);
@@ -186,8 +195,13 @@ export async function updateAssetWith(repo: Repo, id: unknown, patch: unknown, n
       return bad('La devise ne peut pas être modifiée après la création de l’actif.');
     }
 
+    // Un actif désigné par la Stratégie ne change pas de classe : il deviendrait un actif principal ou un métal invalide.
+    if (patch.assetClass != null && patch.assetClass !== existing.assetClass && (await strategyAssetIds(repo)).includes(id)) {
+      return bad('Cet actif est utilisé par ta Stratégie : change-le d’abord dans Stratégie avant de changer sa classe.');
+    }
+
     // Les règles croisées (Auto ⇒ cotation…) se vérifient sur l'actif tel qu'il serait après modification.
-    const keys = ASSET_KEYS.filter((k) => k !== 'currency' && patch[k] !== undefined);
+    const keys = ASSET_KEYS.filter((k) => k !== 'currency' && k !== 'archived' && patch[k] !== undefined);
     const candidate: Record<string, unknown> = {};
     for (const k of ASSET_KEYS) if (existing[k] !== undefined) candidate[k] = existing[k];
     for (const k of keys) {
@@ -224,11 +238,9 @@ export async function archiveAssetWith(repo: Repo, id: unknown, archived: unknow
   if (typeof archived !== 'boolean') return bad('Archivage invalide');
   try {
     if (!(await repo.listAssets()).some((a) => a.id === id)) return bad(ASSET_NOT_FOUND);
-    if (archived) {
-      // Un actif désigné par la Stratégie (or, argent, épargne, actif principal d'une classe) ne s'archive pas.
-      const strategy = await repo.getStrategy();
-      const used = [strategy.goldAssetId, strategy.silverAssetId, strategy.savingsAssetId, ...Object.values(strategy.mainAssetByClass)];
-      if (used.includes(id)) return bad('Cet actif est utilisé par ta Stratégie : change-le d’abord dans Stratégie.');
+    // Un actif désigné par la Stratégie (or, argent, épargne, actif principal d'une classe) ne s'archive pas.
+    if (archived && (await strategyAssetIds(repo)).includes(id)) {
+      return bad('Cet actif est utilisé par ta Stratégie : change-le d’abord dans Stratégie.');
     }
     await repo.updateAsset(id, { archived });
     return { ok: true };

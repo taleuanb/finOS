@@ -58,4 +58,32 @@ describe('actions Stratégie', () => {
     expect(await saveMonthlyInvest(100)).toEqual({ ok: false, error: "L'enregistrement a échoué. Réessaie dans un instant." });
     expect(revalidateTag).not.toHaveBeenCalled();
   });
+
+  it('saveMetalGrid : un échec après une première écriture invalide quand même la Stratégie (écritures partielles)', async () => {
+    let calls = 0;
+    const set = repo.setStrategyEntry.bind(repo);
+    vi.spyOn(repo, 'setStrategyEntry').mockImplementation(async (e) => {
+      if (++calls === 2) throw new Error('notion down');
+      return set(e);
+    });
+    const zones = [
+      { label: 'Bas', min: 0, max: 60, goldPercent: 60 },
+      { label: 'Haut', min: 60, max: null, goldPercent: 40 },
+    ];
+    expect(await saveMetalGrid(zones)).toEqual({ ok: false, error: "L'enregistrement a échoué. Réessaie dans un instant." });
+    expect(revalidateTag.mock.calls).toEqual([['notion:strategy']]);
+  });
+
+  it('saveSpecialAssets : un échec après une première écriture invalide quand même la Stratégie', async () => {
+    let calls = 0;
+    const set = repo.setStrategyEntry.bind(repo);
+    vi.spyOn(repo, 'setStrategyEntry').mockImplementation(async (e) => {
+      if (++calls === 2) throw new Error('notion down');
+      return set(e);
+    });
+    expect(await saveSpecialAssets({ goldAssetId: 'ag', silverAssetId: 'or' })).toEqual({
+      ok: false, error: "L'enregistrement a échoué. Réessaie dans un instant.",
+    });
+    expect(revalidateTag.mock.calls).toEqual([['notion:strategy']]);
+  });
 });

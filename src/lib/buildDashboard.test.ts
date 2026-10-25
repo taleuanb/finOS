@@ -70,7 +70,7 @@ describe('buildDashboard : totaux et répartition', () => {
   it('topPerformers : 5 meilleurs gainPct, décroissants', () => {
     const d = buildDashboard(input());
     expect(d.topPerformers).toHaveLength(5);
-    expect(d.topPerformers[0].id).toBe('domaines');
+    expect(d.topPerformers[0].id).toBe('ag'); // argent : 779,927 g × 1 952 €/kg pour 948 € investis
     const pcts = d.topPerformers.map((a) => a.gainPct!);
     expect([...pcts].sort((x, y) => y - x)).toEqual(pcts);
   });
@@ -152,9 +152,10 @@ describe('buildDashboard : métaux', () => {
     const gold = d.metals.gold!;
     // Grammes = somme des mouvements (I12) : 6,4516 + 6,4516 + collier 0 g.
     expect(gold).toMatchObject({ assetId: 'or', grams: 12.9032, spotEurPerKg: 125_926 });
-    expect(gold.valueEur).toBeCloseTo(3_136, 6);
+    const goldValue = (12.9032 * 125_926) / 1000; // grammes des mouvements × cours €/kg
+    expect(gold.valueEur).toBeCloseTo(goldValue, 6);
     expect(gold.costEur).toBe(2_402);
-    expect(gold.gainPct).toBeCloseTo((3_136 - 2_402) / 2_402, 9);
+    expect(gold.gainPct).toBeCloseTo((goldValue - 2_402) / 2_402, 9);
     // M1 : le collier (0 g fin) est exclu du coût moyen (≈ 85 405 €/kg au lieu de 186 k€/kg).
     expect(gold.avgCostPerKg).toBeCloseTo(((547 + 555) / (6.4516 + 6.4516)) * 1000, 4);
     const goldPremiums = d.metals.purchases.filter((p) => p.metal === 'gold' && p.premium !== null).map((p) => p.premium!);
@@ -232,6 +233,7 @@ describe('buildDashboard : plan du mois', () => {
       assets: d.assets,
       strategy: fixtureSeed.strategy,
       ratio: d.metals.ratio,
+      fx: d.fx,
     });
     expect(d.plan.proposal).toEqual(expected);
     expect(d.plan.proposal!.length).toBeGreaterThan(0);
@@ -385,3 +387,61 @@ describe('buildDashboard : mode démo (I9)', () => {
   });
 });
 
+
+describe('buildDashboard : valeur des actifs auto suivant les mouvements (quantité × cours)', () => {
+  const auto = (over: Partial<Asset>): Asset => ({
+    id: 'x', name: 'X', assetClass: 'Fonds & ETF', currency: 'EUR', mode: 'auto', quoteId: 'X',
+    quantity: 0, costBasis: 0, archived: false, syncStatus: 'OK', lastUpdate: '2026-11-10T06:00:00Z', ...over,
+  });
+  const buy = (assetId: string, quantity: number, amount: number) => ({
+    id: `mv-${assetId}-${quantity}`, label: 'Achat', date: '2026-11-09', assetId, kind: 'buy' as const, quantity, amount,
+  });
+
+  it('ETF en USD : un achat ajouté après la synchro change aussitôt la valeur (quantité × cours, en USD puis €)', () => {
+    const etf = auto({ id: 'etf-usd', currency: 'USD', unitPrice: 50, value: 500, valueEur: 500 / 1.08 });
+    const d = buildDashboard(input({ assets: [etf], movements: [buy('etf-usd', 10, 480), buy('etf-usd', 4, 190)], strategy: { ...fixtureSeed.strategy, savingsAssetId: undefined } }));
+    expect(d.assets[0].quantity).toBe(14);
+    expect(d.assets[0].value).toBeCloseTo(700, 9);
+    expect(d.assets[0].valueEur).toBeCloseTo(700 / 1.08, 9);
+    expect(d.totals.grossEur).toBeCloseTo(700 / 1.08, 9);
+  });
+
+  it('métal : grammes fins × cours €/kg ÷ 1000, même pour un actif en MAD', () => {
+    const or = auto({ id: 'or-mad', assetClass: 'Métaux précieux', currency: 'MAD', quoteId: 'XAU', unitPrice: 120_000, value: 0, valueEur: 0 });
+    const d = buildDashboard(input({ assets: [or], movements: [buy('or-mad', 10, 13_000)], strategy: { ...fixtureSeed.strategy, savingsAssetId: undefined } }));
+    expect(d.assets[0].valueEur).toBeCloseTo(1_200, 9);
+    expect(d.assets[0].value).toBeCloseTo(1_200 * 10.85, 6);
+  });
+
+  it('sans cours connu (jamais synchronisé) : la valeur stockée est conservée', () => {
+    const fresh = auto({ id: 'neuf', value: 321, valueEur: 321 });
+    const d = buildDashboard(input({ assets: [fresh], movements: [buy('neuf', 3, 300)], strategy: { ...fixtureSeed.strategy, savingsAssetId: undefined } }));
+    expect(d.assets[0]).toMatchObject({ quantity: 3, value: 321, valueEur: 321 });
+  });
+
+  it('les métaux du jeu de démonstration valent grammes des mouvements × cours', () => {
+    const d = buildDashboard(input());
+    expect(d.metals.gold!.valueEur).toBeCloseTo((12.9032 * 125_926) / 1000, 6);
+    expect(d.metals.silver!.valueEur).toBeCloseTo(((93.309 * 3 + 500) * 1_952) / 1000, 6);
+  });
+});
+
+describe('buildDashboard : crédits', () => {
+  it('la valeur € d’un crédit suit toujours le capital restant dû (jamais une « Valeur € » stockée périmée)', () => {
+    const debt = { ...fixtureSeed.debts[0], outstanding: 540_000, valueEur: 600_000 / 10.85 };
+    const d = buildDashboard(input({ debts: [debt] }));
+    expect(d.debts[0].valueEur).toBeCloseTo(540_000 / 10.85, 6);
+    expect(d.totals.debtsEur).toBeCloseTo(540_000 / 10.85, 6);
+  });
+});
+
+describe('buildDashboard : versement fixe en devise', () => {
+  it('la proposition convertit le versement fixe d’un actif en MAD', () => {
+    const assets = fixtureSeed.assets.map((a) => (a.id === 'per' ? { ...a, currency: 'MAD' as const, fixedMonthly: 1_085 } : a));
+    const d = buildDashboard(input({ assets, plan: planWithoutNovember }));
+    const per = d.plan.proposal!.find((l) => l.assetId === 'per')!;
+    expect(per.origin).toBe('fixe');
+    expect(per.amount).toBeGreaterThanOrEqual(100);
+    expect(per.amount).toBeLessThan(1_085);
+  });
+});

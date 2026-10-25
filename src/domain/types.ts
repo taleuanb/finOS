@@ -12,6 +12,11 @@ export const ASSET_CLASSES: AssetClass[] = [
   'Comptes courants', 'Startups', 'Métaux précieux', 'Noms de domaine',
 ];
 
+/** Classes que le plan peut piloter par une cible (les autres ne sont pas investissables par le plan). */
+export const PILOTABLE_CLASSES: readonly AssetClass[] = ASSET_CLASSES.filter(
+  (c) => c !== 'Épargne' && c !== 'Comptes courants' && c !== 'Immobilier' && c !== 'Autres',
+);
+
 export interface FxRates { date: string; EUR: 1; MAD: number; USD: number; GBP: number }
 
 export interface Asset {

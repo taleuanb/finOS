@@ -170,3 +170,28 @@ describe('reservedAndFree', () => {
     expect(reservedAndFree(1000, new Map())).toEqual({ reservedEur: 0, freeEur: 1000 });
   });
 });
+
+describe('toInvestByAsset — dérive du taux MAD (I2)', () => {
+  // Prévu 165 € ; achat payé 1 790,25 MAD (= 165 € au taux 10,85). Le lendemain, le taux bouge.
+  const madAsset = [asset('mad', { currency: 'MAD', assetClass: 'Autres' })];
+  const madPlan = [line('2026-11', 'mad', 165)];
+  const paid = [buy('b1', '2026-11-12', 'mad', 1790.25)];
+  const drift: FxRates = { ...fx, MAD: 10.86 }; // 1 790,25 / 10,86 = 164,85 € → reste 0,15 €
+
+  it('un reste de moins de 1 € compte comme 0 (Déclaré)', () => {
+    expect(toInvestByAsset(madPlan, paid, madAsset, drift, '2026-11').get('mad')).toBe(0);
+    expect(monthStatus('mad', '2026-11', madPlan, paid, madAsset, drift)).toBe('declared');
+    expect(reservedAndFree(1000, toInvestByAsset(madPlan, paid, madAsset, drift, '2026-11')).reservedEur).toBe(0);
+  });
+
+  it('arrondit le reste au centime', () => {
+    const half = [buy('b1', '2026-11-12', 'mad', 1000)];
+    // 165 − 1000 / 10,86 = 72,9189… → 72,92
+    expect(toInvestByAsset(madPlan, half, madAsset, drift, '2026-11').get('mad')).toBe(72.92);
+  });
+
+  it('un reste ≥ 1 € reste dû', () => {
+    const almost = [buy('b1', '2026-11-12', 'mad', 1779.4)]; // ≈ 164 € au taux 10,85 → 1 € dû
+    expect(toInvestByAsset(madPlan, almost, madAsset, fx, '2026-11').get('mad')).toBe(1);
+  });
+});

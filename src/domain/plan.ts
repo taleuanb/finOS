@@ -8,9 +8,14 @@ function movementEur(m: Movement, assetById: Map<string, Asset>, fx: FxRates): n
   return asset ? toEur(m.amount, asset.currency, fx) : 0;
 }
 
+/** En dessous de ce reste (en €), une ligne est considérée comme couverte (écarts de change, arrondis). */
+export const SETTLED_BELOW_EUR = 1;
+
 /**
  * « À investir » par actif jusqu'à uptoMonth inclus (spec 5.4) :
  * Σ des montants prévus − Σ des achats depuis le premier mois du plan de l'actif, minimum 0.
+ * Le reste est arrondi au centime et vaut 0 s'il est inférieur à 1 € (un achat payé en MAD ne redevient
+ * pas « En attente » quand le taux bouge de quelques centimes).
  * Les actifs sans ligne de plan jusqu'à uptoMonth sont absents de la Map.
  */
 export function toInvestByAsset(
@@ -41,7 +46,8 @@ export function toInvestByAsset(
 
   const out = new Map<string, number>();
   for (const [assetId, p] of planned) {
-    out.set(assetId, Math.max(0, p.total - (bought.get(assetId) ?? 0)));
+    const rest = Math.round((p.total - (bought.get(assetId) ?? 0)) * 100) / 100;
+    out.set(assetId, rest < SETTLED_BELOW_EUR ? 0 : rest);
   }
   return out;
 }

@@ -6,7 +6,7 @@ Application personnelle, pensée pour le mobile (colonne de 390 px), qui suit un
 
 ## Prérequis
 
-- Node.js 20 ou plus récent et npm
+- Node.js 20.12 ou plus récent (pour `process.loadEnvFile`) et npm
 - Un compte Notion (pour la mise en production) et un compte Vercel (pour le déploiement)
 
 ## Développement local
@@ -32,9 +32,22 @@ Sans `NOTION_TOKEN`, l'app fonctionne **sans Notion** grâce à `FakeRepo` : ell
    npx tsx --env-file=.env.local scripts/setup-notion.ts
    ```
 
-   Le script crée la page « Patrimoine » sous WEALTH, avec les bases Actifs, Mouvements, Dettes, Budget, Stratégie, Plan et Historique.
+   Le script crée la page « Patrimoine » sous WEALTH, avec les bases Actifs, Mouvements, Dettes, Budget, Stratégie, Plan mensuel et Historique. Chaque identifiant `NOTION_DB_*` est affiché dès que sa base est créée ; en cas d'échec, le script rappelle les bases déjà créées (à supprimer avec la page « Patrimoine » avant de relancer).
 4. Coller dans `.env.local` les lignes `NOTION_DB_*` affichées par le script. Ce sont des identifiants de **sources de données** (data sources), pas d'anciennes bases.
-5. Dans la base **Stratégie**, renseigner à la main la relation « Actif » de chaque ligne (actif principal de chaque classe).
+5. **Restreindre l'accès** : partager la seule page « Patrimoine » avec l'intégration (menu `…` → `Connexions`), puis retirer l'intégration de la page WEALTH. L'intégration n'a ainsi accès qu'à « Patrimoine » et à ses bases.
+6. **Compléter la base Stratégie** (une ligne par réglage, colonne `Clé`). Le script crée les lignes avec leurs valeurs par défaut ; il reste à choisir les actifs dans la colonne relation `Actif` :
+
+   | Clé | Colonne utilisée | Rôle |
+   | --- | --- | --- |
+   | `cible:<Classe>` (ex. `cible:Fonds & ETF`) | `Valeur` = % ; `Actif` = **actif principal** de la classe | Cible de la classe et actif qui reçoit sa part |
+   | `actif:or` | `Actif` | Actif « Or » (métaux) |
+   | `actif:argent` | `Actif` | Actif « Argent » (métaux) |
+   | `actif:epargne` | `Actif` | Actif Épargne qui porte l'argent non investi |
+   | `investissement_mensuel` | `Valeur` | Montant à investir par mois (ex. 900) |
+   | `zone:<libellé>` (ex. `zone:Neutre`) | `Valeur` = % d'or ; `Texte` = bornes `min-max` (`80-` pour « plus de 80 ») | Grille or/argent ; les bornes acceptent `-`, `–` ou `—` |
+   | `devise_affichage` | `Texte` (`EUR`, `MAD` ou `USD`) | Devise d'affichage par défaut |
+
+   **Renseigner les relations `Actif` (actif principal de chaque ligne `cible:…`, `actif:or`, `actif:argent`, `actif:epargne`) avant d'importer les métaux ou de valider un plan** : sans elles, la répartition affiche « Aucun actif principal pour la classe … ».
 
 Aucune écriture n'est faite dans Notion sans action explicite de votre part, sauf les champs « (script) » mis à jour par la synchro.
 

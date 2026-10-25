@@ -7,6 +7,8 @@ for (const file of ['.env.local', '.env']) {
   try { process.loadEnvFile(file); } catch { /* fichier absent : on s'appuie sur l'environnement */ }
 }
 
+const created: string[] = [];
+
 async function main() {
   const token = process.env.NOTION_TOKEN;
   const parentPageId = process.env.NOTION_PARENT_PAGE_ID;
@@ -16,20 +18,24 @@ async function main() {
     process.exit(1);
   }
 
-  console.error('Création de la page « Patrimoine » et des bases (environ 10 s)…');
-  const ids = await setupNotion(createNotionClient(token), parentPageId);
-
+  console.error('Création de la page « Patrimoine » et des bases (environ 15 s)…');
   console.log('\n# À copier dans .env.local (identifiants des sources de données Notion)');
-  console.log(`NOTION_DB_ASSETS=${ids.assets}`);
-  console.log(`NOTION_DB_MOVEMENTS=${ids.movements}`);
-  console.log(`NOTION_DB_DEBTS=${ids.debts}`);
-  console.log(`NOTION_DB_BUDGET=${ids.budget}`);
-  console.log(`NOTION_DB_STRATEGY=${ids.strategy}`);
-  console.log(`NOTION_DB_PLAN=${ids.plan}`);
-  console.log(`NOTION_DB_HISTORY=${ids.history}`);
+  // Chaque identifiant est affiché dès que sa base existe : en cas d'échec, ceux déjà créés restent visibles.
+  await setupNotion(createNotionClient(token), parentPageId, undefined, (key, id) => {
+    created.push(`NOTION_DB_${key.toUpperCase()}=${id}`);
+    console.log(created.at(-1));
+  });
+  console.error('\nTerminé. Dans Notion, partagez ensuite la seule page « Patrimoine » avec l’intégration (retirez l’accès à WEALTH).');
 }
 
 main().catch(error => {
   console.error('Échec de la création des bases :', error instanceof Error ? error.message : error);
+  if (created.length > 0) {
+    console.error('Bases déjà créées dans Notion (à supprimer ou à réutiliser avant de relancer) :');
+    for (const line of created) console.error(`  ${line}`);
+  } else {
+    console.error('Aucune base n’a été créée.');
+  }
+  console.error('La page « Patrimoine » a pu être créée sous la page parente : supprimez-la avant de relancer le script.');
   process.exit(1);
 });

@@ -19,9 +19,22 @@ function fakeClient() {
     },
     dataSources: {
       async update(args: any) { calls.push({ op: 'dataSources.update', args }); return { id: args.data_source_id }; },
+      async retrieve(args: any) {
+        calls.push({ op: 'dataSources.retrieve', args });
+        // Propriété créée côté Actifs par la relation double de Mouvements (ds-3), au nom choisi par Notion.
+        const mov = calls.find(c => c.op === 'databases.create' && c.args.initial_data_source.properties[P.movements.asset]);
+        const name = relationName;
+        return {
+          id: args.data_source_id,
+          properties: mov && args.data_source_id === 'ds-2'
+            ? { [P.assets.name]: { type: 'title', title: {} }, [name]: { type: 'relation', relation: { data_source_id: 'ds-3', type: 'dual_property' } } }
+            : {},
+        };
+      },
     },
   };
-  return { client, calls };
+  let relationName: string = P.assets.movements;
+  return { client, calls, renameRelation: (n: string) => { relationName = n; } };
 }
 
 const identity = <T>(fn: () => Promise<T>) => fn();
@@ -44,6 +57,7 @@ describe('setupNotion', () => {
         return c.args.parent.page_id === 'parent-1' ? 'page:Patrimoine' : `row:${c.args.properties[P.strategy.key].title[0].text.content}`;
       }
       if (c.op === 'databases.create') return `db:${titleOf(c.args)}`;
+      if (c.op === 'dataSources.retrieve') return `retrieve:${c.args.data_source_id}`;
       return `update:${c.args.data_source_id}:${Object.keys(c.args.properties).join('+')}`;
     });
     const dbOrder = steps.filter(s => s.startsWith('db:'));
@@ -105,7 +119,11 @@ describe('setupNotion', () => {
       function: 'sum', relation_property_name: P.assets.movements, rollup_property_name: P.movements.signedAmount,
     });
     expect(props[P.assets.gain].formula.expression).toContain(P.assets.costBasis);
-    expect(props[P.assets.gainPct].formula.expression).toContain(P.assets.gain);
+    // I6 : « % » ne référence pas « Plus-value », créée dans la même requête : formule développée.
+    expect(props[P.assets.gainPct].formula.expression).toBe(
+      `if(prop("${P.assets.costBasis}") > 0, (prop("${P.assets.value}") - prop("${P.assets.costBasis}")) / prop("${P.assets.costBasis}"), 0)`,
+    );
+    expect(props[P.assets.gainPct].formula.expression).not.toContain(`prop("${P.assets.gain}")`);
   });
 
   it('Stratégie : lignes par défaut (cibles, 5 zones, investissement 900, devise EUR)', async () => {
@@ -140,4 +158,41 @@ describe('setupNotion', () => {
     expect(hist[P.history.date].date).toEqual({});
     for (const t of Object.values(DB)) expect(Object.values(byTitle(t)).filter((p: any) => p.title).length).toBe(1);
   });
+
+  it('I6 : rollups sur le vrai nom de la relation renvoyé par Notion', async () => {
+    const { client, calls, renameRelation } = fakeClient();
+    renameRelation('Mouvements 1');
+    await setupNotion(client, 'parent-1', identity);
+    expect(calls.some(c => c.op === 'dataSources.retrieve' && c.args.data_source_id === 'ds-2')).toBe(true);
+    const props = Object.assign({}, ...calls.filter(c => c.op === 'dataSources.update' && c.args.data_source_id === 'ds-2').map(u => u.args.properties));
+    expect(props[P.assets.quantity].rollup.relation_property_name).toBe('Mouvements 1');
+    expect(props[P.assets.costBasis].rollup.relation_property_name).toBe('Mouvements 1');
+  });
+
+  it('I6 : chaque identifiant est signalé dès la création de sa base', async () => {
+    const { client, calls } = fakeClient();
+    const seen: { key: string; id: string; callsSoFar: number }[] = [];
+    await setupNotion(client, 'parent-1', identity, (key, id) => seen.push({ key, id, callsSoFar: calls.length }));
+    expect(seen.map(x => x.key)).toEqual(['assets', 'movements', 'debts', 'budget', 'strategy', 'plan', 'history']);
+    expect(seen[0]).toMatchObject({ id: 'ds-2', callsSoFar: 2 }); // juste après la page et la base Actifs
+  });
+
+  it('I6 : en cas d’échec, les bases déjà créées ont été signalées', async () => {
+    const { client } = fakeClient();
+    let n = 0;
+    const failing = { ...client, databases: { async create(args: any) { if (++n === 3) throw new Error('Notion 500'); return client.databases.create(args); } } };
+    const seen: string[] = [];
+    await expect(setupNotion(failing, 'parent-1', identity, (key) => seen.push(key))).rejects.toThrow('Notion 500');
+    expect(seen).toEqual(['assets', 'movements']);
+  });
+
+  it('I7 : Stratégie contient les lignes actif:or, actif:argent et actif:epargne (relation vide)', async () => {
+    const { client, calls } = fakeClient();
+    await setupNotion(client, 'parent-1', identity);
+    const keys = calls
+      .filter(c => c.op === 'pages.create' && c.args.parent.data_source_id === 'ds-6')
+      .map(c => c.args.properties[P.strategy.key].title[0].text.content);
+    expect(keys).toEqual(expect.arrayContaining([STRATEGY_KEY.gold, STRATEGY_KEY.silver, STRATEGY_KEY.savings]));
+  });
 });
+

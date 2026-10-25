@@ -4,6 +4,8 @@ const WINDOW_MS = 1000;
 const MAX_STARTS_PER_WINDOW = 3;
 const MAX_RETRIES = 3;
 const BACKOFF_MS = [1000, 2000, 4000];
+/** Un `Retry-After` démesuré ne doit pas bloquer une requête (ni la synchro) au-delà de 10 s. */
+const MAX_RETRY_AFTER_MS = 10_000;
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
@@ -33,7 +35,7 @@ function retryAfterMs(error: unknown): number | undefined {
 
 /**
  * File d'attente partagée : au plus 3 démarrages par fenêtre glissante de 1 s ; sur un 429, nouvelle tentative
- * après `Retry-After` (sinon 1 s, 2 s, 4 s), 3 nouvelles tentatives au plus. Toute autre erreur est relancée telle quelle.
+ * après `Retry-After` plafonné à 10 s (sinon 1 s, 2 s, 4 s), 3 nouvelles tentatives au plus. Toute autre erreur est relancée telle quelle.
  */
 export function createRateLimiter() {
   const starts: number[] = [];
@@ -59,7 +61,8 @@ export function createRateLimiter() {
         return await fn();
       } catch (error) {
         if (!isRateLimited(error) || attempt >= MAX_RETRIES) throw error;
-        await sleep(retryAfterMs(error) ?? BACKOFF_MS[attempt]);
+        const retryAfter = retryAfterMs(error);
+        await sleep(retryAfter === undefined ? BACKOFF_MS[attempt] : Math.min(retryAfter, MAX_RETRY_AFTER_MS));
       }
     }
   }

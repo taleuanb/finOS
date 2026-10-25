@@ -48,6 +48,17 @@ describe('withRateLimit', () => {
     await expect(p).resolves.toBe('ok');
   });
 
+  it('Retry-After plafonné à 10 s', async () => {
+    const { run } = createRateLimiter();
+    const fn = vi.fn().mockRejectedValueOnce(rateLimited({ 'Retry-After': '3600' })).mockResolvedValueOnce('ok');
+    const p = run(fn);
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(fn).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(fn).toHaveBeenCalledTimes(2);
+    await expect(p).resolves.toBe('ok');
+  });
+
   it('429 sans Retry-After → délais croissants 1 s, 2 s, 4 s', async () => {
     const { run } = createRateLimiter();
     const t0 = Date.now();

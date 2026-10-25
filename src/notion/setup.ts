@@ -10,7 +10,7 @@ import { DB, OPT, P, STRATEGY_KEY } from './schema';
 export interface SetupClient {
   pages: { create(args: any): Promise<any> };
   databases: { create(args: any): Promise<any> };
-  dataSources: { update(args: any): Promise<any> };
+  dataSources: { update(args: any): Promise<any>; retrieve(args: any): Promise<any> };
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
@@ -50,11 +50,13 @@ const signed = (field: string) =>
  * Crée la page « Patrimoine » sous `parentPageId` puis les 7 bases (spec §4.1 à 4.7).
  * Renvoie, pour chaque base, l'identifiant de sa **source de données** (v5 : c'est lui que les requêtes
  * `dataSources.query`, `pages.create({ parent: { data_source_id } })` et les relations attendent).
+ * `onCreated` est appelé dès qu'une base existe : en cas d'échec plus loin, les identifiants déjà créés sont connus.
  */
 export async function setupNotion(
   client: SetupClient,
   parentPageId: string,
   run: Run = withRateLimit,
+  onCreated: (key: keyof typeof DB, dataSourceId: string) => void = () => {},
 ): Promise<Record<keyof typeof DB, string>> {
   let rootPageId = '';
 
@@ -98,6 +100,7 @@ export async function setupNotion(
     [a.lastUpdate]: date(),
     [a.archived]: checkbox(),
   });
+  onCreated('assets', assets);
 
   // 3. Mouvements, avec la relation double vers Actifs (crée la propriété « Mouvements » côté Actifs)
   const m = P.movements;
@@ -112,6 +115,7 @@ export async function setupNotion(
     [m.spotEurPerKg]: num(),
     [m.planMonth]: text(),
   });
+  onCreated('movements', movements);
 
   // 4. Formules de Mouvements : valeurs signées + prime (métaux : Montant / (poids fin en kg × spot €/kg) − 1)
   await addProperties(movements, {
@@ -123,14 +127,21 @@ export async function setupNotion(
     ),
   });
 
-  // 5. Rollups d'Actifs (somme des champs signés), puis plus-value et % qui s'appuient sur eux
+  // 5. Rollups d'Actifs (somme des champs signés) sur la relation créée par Notion côté Actifs : son nom réel
+  //    est relu (Notion peut le changer, ex. « Mouvements 1 »), sinon le nom demandé.
+  const assetsDs = await run(() => client.dataSources.retrieve({ data_source_id: assets }));
+  const relationName = Object.entries((assetsDs?.properties ?? {}) as Record<string, { type?: string; relation?: { data_source_id?: string } }>)
+    .find(([, prop]) => prop?.type === 'relation' && prop.relation?.data_source_id === movements)?.[0] ?? a.movements;
   await addProperties(assets, {
-    [a.quantity]: sumRollup(a.movements, m.signedQuantity),
-    [a.costBasis]: sumRollup(a.movements, m.signedAmount),
+    [a.quantity]: sumRollup(relationName, m.signedQuantity),
+    [a.costBasis]: sumRollup(relationName, m.signedAmount),
   });
+  // Plus-value et % : « % » développe le calcul au lieu de référencer « Plus-value », créée dans la même requête.
   await addProperties(assets, {
     [a.gain]: formula(`prop("${a.value}") - prop("${a.costBasis}")`),
-    [a.gainPct]: formula(`if(prop("${a.costBasis}") > 0, prop("${a.gain}") / prop("${a.costBasis}"), 0)`),
+    [a.gainPct]: formula(
+      `if(prop("${a.costBasis}") > 0, (prop("${a.value}") - prop("${a.costBasis}")) / prop("${a.costBasis}"), 0)`,
+    ),
   });
 
   // 6. Dettes, Budget, Stratégie
@@ -146,6 +157,7 @@ export async function setupNotion(
     [d.financedAsset]: singleRelation(assets),
     [d.valueEur]: num(),
   });
+  onCreated('debts', debts);
 
   const b = P.budget;
   const budget = await createDatabase(DB.budget, {
@@ -156,6 +168,7 @@ export async function setupNotion(
     [b.currency]: select(CURRENCIES),
     [b.order]: num(),
   });
+  onCreated('budget', budget);
 
   const s = P.strategy;
   const strategy = await createDatabase(DB.strategy, {
@@ -164,6 +177,7 @@ export async function setupNotion(
     [s.text]: text(),
     [s.asset]: singleRelation(assets),
   });
+  onCreated('strategy', strategy);
 
   const strategyRow = (key: string, value?: number, textValue?: string) => run(() => client.pages.create({
     parent: { type: 'data_source_id', data_source_id: strategy },
@@ -180,6 +194,8 @@ export async function setupNotion(
     await strategyRow(`${STRATEGY_KEY.zonePrefix}${zone.label}`, Math.round(zone.goldShare * 100), range);
   }
   await strategyRow(STRATEGY_KEY.displayCurrency, undefined, 'EUR');
+  // Lignes à relation vide : l'utilisateur y choisit l'actif Or, Argent et Épargne.
+  for (const key of [STRATEGY_KEY.gold, STRATEGY_KEY.silver, STRATEGY_KEY.savings]) await strategyRow(key);
 
   // 7. Plan mensuel, Historique
   const p = P.plan;
@@ -189,6 +205,7 @@ export async function setupNotion(
     [p.amount]: num(),
     [p.origin]: select([OPT.origin.fixe, OPT.origin.cible, OPT.origin.signal]),
   });
+  onCreated('plan', plan);
 
   const h = P.history;
   const history = await createDatabase(DB.history, {
@@ -203,6 +220,7 @@ export async function setupNotion(
     [h.eurUsd]: num(),
     [h.partial]: checkbox(),
   });
+  onCreated('history', history);
 
   return { assets, movements, debts, budget, strategy, plan, history };
 }

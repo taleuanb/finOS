@@ -16,15 +16,31 @@ const FIXED_REASON = 'Versement fixe programmé';
 
 interface Share { assetId: string; raw: number; origin: AllocationLine['origin']; reason: string }
 
-/** Arrondi à l'euro par la méthode du plus grand reste : la somme des parts vaut `total`. */
-function roundLargestRemainder(raws: number[], total: number): number[] {
-  const floors = raws.map((r) => Math.floor(r));
-  let missing = total - floors.reduce((s, f) => s + f, 0);
-  const order = raws
-    .map((r, i) => ({ i, rem: r - floors[i] }))
-    .sort((a, b) => b.rem - a.rem || a.i - b.i);
-  for (let k = 0; missing > 0 && order.length > 0; k = (k + 1) % order.length, missing--) floors[order[k].i] += 1;
-  return floors;
+const toCents = (n: number) => Math.round(n * 100);
+
+/** Entiers ≥ 0 proportionnels à `weights` dont la somme vaut `total` (méthode du plus grand reste). */
+function largestRemainder(weights: number[], total: number): number[] {
+  const w = weights.map((x) => Math.max(0, x));
+  const sumW = w.reduce((s, x) => s + x, 0);
+  if (total <= 0 || sumW <= 0) return w.map(() => 0);
+  const exact = w.map((x) => (x * total) / sumW);
+  const out = exact.map((x) => Math.floor(x));
+  let missing = total - out.reduce((s, x) => s + x, 0);
+  const order = exact.map((x, i) => ({ i, rem: x - out[i] })).sort((a, b) => b.rem - a.rem || a.i - b.i);
+  for (let k = 0; missing > 0; k = (k + 1) % order.length, missing--) out[order[k].i] += 1;
+  return out;
+}
+
+/**
+ * Parts arrondies en centimes entiers dont la somme vaut exactement `totalCents`. Les parts restent à l'euro
+ * près ; seuls les centimes du total (ex. M = 769,75 €) s'ajoutent aux parts dont le reste est le plus grand.
+ */
+function roundToCents(raws: number[], totalCents: number): number[] {
+  const euros = largestRemainder(raws, Math.floor(totalCents / 100));
+  const residual = totalCents - euros.reduce((s, e) => s + e, 0) * 100;
+  const rest = raws.map((r, i) => r * 100 - euros[i] * 100);
+  const extra = largestRemainder(rest.some((r) => r > 0) ? rest : raws, residual);
+  return euros.map((e, i) => e * 100 + extra[i]);
 }
 
 /**
@@ -42,12 +58,14 @@ export function allocate(input: AllocateInput): AllocationLine[] {
   let fixedTotal = 0;
   for (const a of active) {
     if (!a.fixedMonthly || a.fixedMonthly <= 0) continue;
-    const amt = Math.min(a.fixedMonthly * months, Math.max(0, M - fixedTotal));
-    if (amt <= 0) continue;
-    fixedTotal += amt;
+    const amtCents = Math.min(toCents(a.fixedMonthly * months), Math.max(0, toCents(M) - toCents(fixedTotal)));
+    if (amtCents <= 0) continue;
+    const amt = amtCents / 100;
+    fixedTotal = (toCents(fixedTotal) + amtCents) / 100;
     fixedLines.push({ assetId: a.id, amount: amt, origin: 'fixe', reason: FIXED_REASON });
   }
-  const R = M - fixedTotal;
+  const RCents = Math.max(0, toCents(M) - toCents(fixedTotal));
+  const R = RCents / 100;
 
   // Étape 2 : écarts par classe pilotée.
   const classes = Object.keys(strategy.targets) as AssetClass[];
@@ -69,6 +87,8 @@ export function allocate(input: AllocateInput): AllocationLine[] {
   for (const c of classes) gap.set(c, Math.max(0, base * target(c) - value.get(c)!));
   const gapSum = [...gap.values()].reduce((s, g) => s + g, 0);
   const targetSum = classes.reduce((s, c) => s + target(c), 0);
+
+  if (RCents > 0 && targetSum <= 0) throw new AllocationError('Aucune cible définie dans la Stratégie');
 
   const classShare = (c: AssetClass): number => {
     if (R <= 0) return 0;
@@ -107,19 +127,20 @@ export function allocate(input: AllocateInput): AllocationLine[] {
     }
   }
 
-  const rounded = roundLargestRemainder(shares.map((s) => s.raw), shares.length > 0 ? Math.round(R) : 0);
+  const rounded = roundToCents(shares.map((s) => s.raw), shares.length > 0 ? RCents : 0);
 
   // Une ligne par actif : un actif à versement fixe qui est aussi actif principal cumule ses montants.
   const lines = new Map<string, AllocationLine>();
   for (const l of fixedLines) lines.set(l.assetId, { ...l });
   shares.forEach((s, i) => {
     if (rounded[i] <= 0) return;
+    const amount = rounded[i] / 100;
     const existing = lines.get(s.assetId);
     if (existing) {
-      existing.amount += rounded[i];
+      existing.amount = (toCents(existing.amount) + rounded[i]) / 100;
       existing.reason = `${existing.reason} · ${s.reason}`;
     } else {
-      lines.set(s.assetId, { assetId: s.assetId, amount: rounded[i], origin: s.origin, reason: s.reason });
+      lines.set(s.assetId, { assetId: s.assetId, amount, origin: s.origin, reason: s.reason });
     }
   });
   return [...lines.values()];

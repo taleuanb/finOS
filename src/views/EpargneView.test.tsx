@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { allocate } from '@/domain/allocation';
 import type { AllocationLine } from '@/domain/types';
 import type { Dashboard } from '@/lib/dashboard';
 import { fixtureDashboard } from '@/lib/fixtures';
@@ -468,6 +469,19 @@ describe('EpargneView — proposition : cas limites', () => {
     await user.type(per, '100,5');
     expect(screen.getByRole('button', { name: 'Valider le plan' })).toBeDisabled();
     expect(screen.getByText('Total ≠ 900 €')).toBeInTheDocument();
+  });
+});
+
+describe('EpargneView — proposition non modifiée avec des centimes (I1)', () => {
+  it.each([769.75, 900])('M = %s € : la proposition brute de allocate() est validable telle quelle', (m) => {
+    const assets = fixtureDashboard.assets.map((a) => (a.id === 'per' && m === 900 ? { ...a, fixedMonthly: 100.5 } : a));
+    const lines = allocate({ amount: m, assets, strategy: fixtureDashboard.strategy, ratio: fixtureDashboard.metals.ratio });
+    renderView({
+      ...unvalidated({ proposal: lines }), assets,
+      budget: { ...fixtureDashboard.budget, investEur: m },
+    });
+    expect(screen.queryByText(/Total ≠/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Valider le plan' })).toBeEnabled();
   });
 });
 

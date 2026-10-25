@@ -152,3 +152,45 @@ describe('allocate', () => {
     expect(lines[0].origin).toBe('fixe');
   });
 });
+
+describe('allocate — arrondi au centime (Σ === M)', () => {
+  const totalCents = (lines: AllocationLine[]) => Math.round(sum(lines) * 100);
+  const isCents = (n: number) => Math.abs(n * 100 - Math.round(n * 100)) < 1e-6;
+
+  it('M avec des centimes (769,75) : la somme des lignes vaut exactement M', () => {
+    const lines = allocate({ ...A, amount: 769.75 });
+    expect(totalCents(lines)).toBe(76975);
+    for (const l of lines) expect(isCents(l.amount)).toBe(true);
+  });
+
+  it('versement fixe avec des centimes (100,5) et M = 900 : Σ = 900', () => {
+    const lines = allocate({
+      ...A, amount: 900,
+      assets: A.assets.map((a) => (a.id === 'per' ? { ...a, fixedMonthly: 100.5 } : a)),
+    });
+    expect(totalCents(lines)).toBe(90000);
+    expect(byAsset(lines).per).toBeGreaterThanOrEqual(100.5); // fixe 100,5 + part de la cible PER
+    for (const l of lines) expect(isCents(l.amount)).toBe(true);
+  });
+
+  it('M non arrondi (issu d’une conversion MAD) : Σ = M au centime près', () => {
+    const lines = allocate({ ...B, amount: 600.123456 });
+    expect(totalCents(lines)).toBe(60012);
+  });
+
+  it('aucune cible définie et un reste à répartir : AllocationError lisible', () => {
+    const noTarget = {
+      amount: 300, ratio: null,
+      assets: [asset('per', 'PER', 0, { fixedMonthly: 100 }), asset('etf', 'Fonds & ETF', 0)],
+      strategy: strategy({ mainAssetByClass: { 'Fonds & ETF': 'etf' } }),
+    };
+    expect(() => allocate(noTarget)).toThrow(new AllocationError('Aucune cible définie dans la Stratégie'));
+  });
+
+  it('cibles toutes à 0 : AllocationError', () => {
+    expect(() => allocate({
+      amount: 300, ratio: null, assets: [asset('etf', 'Fonds & ETF', 0)],
+      strategy: strategy({ targets: { 'Fonds & ETF': 0 }, mainAssetByClass: { 'Fonds & ETF': 'etf' } }),
+    })).toThrow(new AllocationError('Aucune cible définie dans la Stratégie'));
+  });
+});

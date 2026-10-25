@@ -1,13 +1,13 @@
 'use client';
 
 import { useId, useState, type FormEvent } from 'react';
-import { INSTITUTIONS, type ActionResult, type AssetPatch } from '@/app/patrimoine/patrimoineOps';
+import { INSTITUTIONS, isRealDate, type ActionResult, type AssetPatch } from '@/app/patrimoine/patrimoineOps';
 import { parisDate } from '@/domain/dates';
 import { ASSET_CLASSES, type Asset, type AssetClass, type AssetInput, type Currency } from '@/domain/types';
 import { BottomSheet } from '@/ui/BottomSheet';
 import { Segmented } from '@/ui/Segmented';
 import {
-  AmountInput, CURRENCY_SYMBOL, Field, SecondaryButton, SheetFooter, inputClass, isIsoDate, parseDecimal, useSubmit,
+  AmountInput, CURRENCY_SYMBOL, CurrencyField, Field, SecondaryButton, SheetFooter, inputClass, parseDecimal, useSubmit,
 } from './formKit';
 
 export interface AssetSheetActions {
@@ -16,7 +16,6 @@ export interface AssetSheetActions {
   archive: (id: string, archived: boolean) => Promise<ActionResult>;
 }
 
-const CURRENCIES: Currency[] = ['EUR', 'MAD', 'USD'];
 const OTHER = '__autre';
 const METALS: AssetClass = 'Métaux précieux';
 const MAX_NAME = 200;
@@ -39,21 +38,38 @@ export function AssetSheet({ asset, actions, onClose, onDone, onAddMovement }: {
 }) {
   const formId = useId();
   const today = parisDate(new Date());
-  const [name, setName] = useState(asset?.name ?? '');
-  const [assetClass, setAssetClass] = useState<AssetClass>(asset?.assetClass ?? 'Autres');
-  const [subtype, setSubtype] = useState(asset?.subtype ?? '');
-  const [institution, setInstitution] = useState(asset?.institution ? (isKnownInstitution(asset.institution) ? asset.institution : OTHER) : '');
-  const [institutionOther, setInstitutionOther] = useState(asset?.institution && !isKnownInstitution(asset.institution) ? asset.institution : '');
-  const [currency, setCurrency] = useState<Currency>(asset?.currency ?? 'EUR');
-  const [mode, setMode] = useState<Mode>(asset?.mode ?? 'manual');
-  const [quoteId, setQuoteId] = useState(asset?.quoteId ?? '');
-  const [manualValue, setManualValue] = useState(asset?.manualValue !== undefined ? String(asset.manualValue) : '');
-  const [manualValueDate, setManualValueDate] = useState(asset ? (asset.manualValueDate ?? '') : today);
+  // Valeurs de départ (texte des champs) : servent aussi à repérer les modifications non enregistrées.
+  const [init] = useState(() => ({
+    name: asset?.name ?? '',
+    assetClass: asset?.assetClass ?? ('Autres' as AssetClass),
+    subtype: asset?.subtype ?? '',
+    institution: asset?.institution ? (isKnownInstitution(asset.institution) ? asset.institution : OTHER) : '',
+    institutionOther: asset?.institution && !isKnownInstitution(asset.institution) ? asset.institution : '',
+    currency: asset?.currency ?? ('EUR' as Currency),
+    mode: asset?.mode ?? ('manual' as Mode),
+    quoteId: asset?.quoteId ?? '',
+    manualValue: asset?.manualValue !== undefined ? String(asset.manualValue) : '',
+    manualValueDate: asset ? (asset.manualValueDate ?? '') : today,
+    fixedMonthly: asset?.fixedMonthly !== undefined ? String(asset.fixedMonthly) : '',
+  }));
+  const [name, setName] = useState(init.name);
+  const [assetClass, setAssetClass] = useState<AssetClass>(init.assetClass);
+  const [subtype, setSubtype] = useState(init.subtype);
+  const [institution, setInstitution] = useState(init.institution);
+  const [institutionOther, setInstitutionOther] = useState(init.institutionOther);
+  const [currency, setCurrency] = useState<Currency>(init.currency);
+  const [mode, setMode] = useState<Mode>(init.mode);
+  const [quoteId, setQuoteId] = useState(init.quoteId);
+  const [manualValue, setManualValue] = useState(init.manualValue);
+  const [manualValueDate, setManualValueDate] = useState(init.manualValueDate);
   const [dateTouched, setDateTouched] = useState(false);
-  const [fixedMonthly, setFixedMonthly] = useState(asset?.fixedMonthly !== undefined ? String(asset.fixedMonthly) : '');
+  const [fixedMonthly, setFixedMonthly] = useState(init.fixedMonthly);
   const [errors, setErrors] = useState<Partial<Record<FieldKey, string>>>({});
   const { pending, error, run } = useSubmit(onDone);
 
+  const dirty = JSON.stringify(init) !== JSON.stringify({
+    name, assetClass, subtype, institution, institutionOther, currency, mode, quoteId, manualValue, manualValueDate, fixedMonthly,
+  });
   const suffix = CURRENCY_SYMBOL[currency];
   const isMetal = assetClass === METALS;
 
@@ -83,7 +99,7 @@ export function AssetSheet({ asset, actions, onClose, onDone, onAddMovement }: {
       // Valeur nouvelle ou modifiée sans toucher à la date : la valeur date d'aujourd'hui.
       valueDate = manualValueDate || undefined;
       if (v !== null && !dateTouched && (!asset || v !== asset.manualValue)) valueDate = today;
-      if (valueDate !== undefined && !isIsoDate(valueDate)) errs.manualValueDate = 'Date invalide';
+      if (valueDate !== undefined && !isRealDate(valueDate)) errs.manualValueDate = 'Date invalide';
     }
 
     let monthly: number | undefined;
@@ -110,7 +126,7 @@ export function AssetSheet({ asset, actions, onClose, onDone, onAddMovement }: {
     }
     // Modification : seuls les champs changés sont envoyés ; un champ optionnel vidé part avec `null`.
     const patch: Record<string, unknown> = {};
-    for (const k of ['name', 'assetClass', 'subtype', 'institution', 'currency', 'mode', 'quoteId', 'manualValue', 'manualValueDate', 'fixedMonthly'] as const) {
+    for (const k of ['name', 'assetClass', 'subtype', 'institution', 'mode', 'quoteId', 'manualValue', 'manualValueDate', 'fixedMonthly'] as const) {
       const before = asset[k];
       const after = next[k];
       if (after === before || (after === undefined && before == null)) continue;
@@ -170,13 +186,7 @@ export function AssetSheet({ asset, actions, onClose, onDone, onAddMovement }: {
           </Field>
         ) : null}
 
-        <Field label="Devise">
-          {(a) => (
-            <select {...a} value={currency} onChange={(e) => setCurrency(e.target.value as Currency)} className={inputClass}>
-              {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          )}
-        </Field>
+        <CurrencyField value={currency} onChange={setCurrency} locked={!!asset} />
 
         <div className="flex flex-col gap-1">
           <span className="text-[13px] font-semibold">Valorisation</span>
@@ -222,7 +232,14 @@ export function AssetSheet({ asset, actions, onClose, onDone, onAddMovement }: {
 
       {asset ? (
         <div className="flex flex-col gap-2 pt-1">
-          {onAddMovement ? <SecondaryButton onClick={onAddMovement} disabled={pending}>Ajouter un mouvement</SecondaryButton> : null}
+          {onAddMovement ? (
+            <>
+              <SecondaryButton onClick={onAddMovement} disabled={pending || dirty} describedBy={dirty ? `${formId}-mouvement` : undefined}>
+                Ajouter un mouvement
+              </SecondaryButton>
+              {dirty ? <p id={`${formId}-mouvement`} className="text-xs text-muted">Enregistre d’abord tes modifications</p> : null}
+            </>
+          ) : null}
           <SecondaryButton onClick={archive} disabled={pending} danger>Archiver</SecondaryButton>
         </div>
       ) : null}

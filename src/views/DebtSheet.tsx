@@ -1,11 +1,11 @@
 'use client';
 
 import { useId, useMemo, useState, type FormEvent } from 'react';
-import { DEBT_TYPES, type ActionResult, type DebtPatch } from '@/app/patrimoine/patrimoineOps';
+import { DEBT_TYPES, isRealDate, type ActionResult, type DebtPatch } from '@/app/patrimoine/patrimoineOps';
 import type { Asset, Currency, Debt, DebtInput } from '@/domain/types';
 import { BottomSheet } from '@/ui/BottomSheet';
 import {
-  AmountInput, CURRENCY_SYMBOL, Field, SecondaryButton, SheetFooter, inputClass, isIsoDate, parseDecimal, useSubmit,
+  AmountInput, CURRENCY_SYMBOL, CurrencyField, Field, SecondaryButton, SheetFooter, inputClass, parseDecimal, useSubmit,
 } from './formKit';
 
 export interface DebtSheetActions {
@@ -14,7 +14,6 @@ export interface DebtSheetActions {
   remove: (id: string) => Promise<ActionResult>;
 }
 
-const CURRENCIES: Currency[] = ['EUR', 'MAD', 'USD'];
 const MAX_NAME = 200;
 
 type FieldKey = 'name' | 'outstanding' | 'rate' | 'monthly' | 'endDate';
@@ -66,7 +65,7 @@ export function DebtSheet({ debt, assets, actions, onClose, onDone }: {
       if (m === null) errs.monthly = 'Mensualité invalide (nombre positif)';
       else monthlyValue = m;
     }
-    if (endDate && !isIsoDate(endDate)) errs.endDate = 'Date invalide';
+    if (endDate && !isRealDate(endDate)) errs.endDate = 'Date invalide';
     setErrors(errs);
     if (Object.keys(errs).length > 0 || principal === null) return;
 
@@ -85,7 +84,7 @@ export function DebtSheet({ debt, assets, actions, onClose, onDone }: {
     }
     // Modification : seuls les champs changés sont envoyés ; un champ optionnel vidé part avec `null`.
     const patch: Record<string, unknown> = {};
-    for (const k of ['name', 'type', 'currency', 'outstanding', 'rate', 'monthly', 'endDate', 'financedAssetId'] as const) {
+    for (const k of ['name', 'type', 'outstanding', 'rate', 'monthly', 'endDate', 'financedAssetId'] as const) {
       const before = debt[k];
       const after = next[k];
       if (after === before || (after === undefined && before == null)) continue;
@@ -125,13 +124,7 @@ export function DebtSheet({ debt, assets, actions, onClose, onDone }: {
             </select>
           )}
         </Field>
-        <Field label="Devise">
-          {(a) => (
-            <select {...a} value={currency} onChange={(e) => setCurrency(e.target.value as Currency)} className={inputClass}>
-              {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-            </select>
-          )}
-        </Field>
+        <CurrencyField value={currency} onChange={setCurrency} locked={!!debt} />
         <Field label={`Capital restant dû (${currency})`} suffix={suffix} error={errors.outstanding}>
           {(a) => <AmountInput aria={a} value={outstanding} onChange={setOutstanding} />}
         </Field>

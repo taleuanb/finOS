@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { DisplayProvider } from '@/ui/display';
+import { DisplayProvider, useDisplay } from '@/ui/display';
 import { fixtureDashboard } from '@/lib/fixtures';
 import type { Dashboard } from '@/lib/dashboard';
 import { PatrimoineView, type PatrimoineActions } from './PatrimoineView';
@@ -238,9 +238,19 @@ describe('PatrimoineView — écriture', () => {
     expect(within(dialog).getByLabelText('Nom')).toHaveValue('Dar Sakan');
   });
 
-  it('les lignes d’actif sont des boutons tactiles dont le nom ne contient aucun montant (mode masqué)', async () => {
-    localStorage.setItem('wos.display', JSON.stringify({ currency: 'EUR', hidden: true }));
-    setup();
+  it('les lignes d’actif sont des boutons tactiles dont le nom ne contient aucun montant ; le masquage cache les valeurs', async () => {
+    localStorage.setItem('wos.display', JSON.stringify({ currency: 'EUR', hidden: false }));
+    const user = userEvent.setup();
+    function Toggle() {
+      const { toggleHidden } = useDisplay();
+      return <button type="button" onClick={toggleHidden}>Basculer le masquage</button>;
+    }
+    render(
+      <DisplayProvider fx={fixtureDashboard.fx}>
+        <Toggle />
+        <PatrimoineView data={fixtureDashboard} actions={actions} />
+      </DisplayProvider>,
+    );
     const buttons = screen.getAllByRole('button', { name: /^Modifier / });
     expect(buttons).toHaveLength(19);
     for (const b of buttons) {
@@ -248,7 +258,14 @@ describe('PatrimoineView — écriture', () => {
       expect(b.getAttribute('aria-label')).not.toMatch(/€|MAD|\$|%/);
     }
     const row = rowOf('Dar Sakan');
-    await vi.waitFor(() => expect(within(row).queryByText('110 599 €')).toBeNull());
+    // Les préférences sont relues : les montants sont visibles…
+    expect(await within(row).findByText('110 599 €')).toBeInTheDocument();
+    expect(within(row).getByText('1 200 000 MAD')).toBeInTheDocument();
+    // …puis masqués après bascule.
+    await user.click(screen.getByRole('button', { name: 'Basculer le masquage' }));
+    expect(within(row).queryByText('110 599 €')).toBeNull();
+    expect(within(row).queryByText(/MAD/)).toBeNull();
+    expect(within(row).getAllByText('•••••••')).toHaveLength(2);
   });
 
   it('un enregistrement réussi ferme la feuille, rafraîchit la route et rend le focus à la ligne', async () => {
@@ -338,5 +355,57 @@ describe('PatrimoineView — écriture', () => {
     await user.type(within(dialog).getByLabelText(/^Capital restant dû/), '8000');
     await user.click(within(dialog).getByRole('button', { name: 'Enregistrer' }));
     expect(actions.createDebt).toHaveBeenCalledWith({ name: 'Prêt auto', currency: 'EUR', outstanding: 8000 });
+  });
+});
+
+describe('PatrimoineView — focus après la saisie d’un mouvement', () => {
+  async function openMovement(user: ReturnType<typeof userEvent.setup>) {
+    const rowButton = screen.getByRole('button', { name: 'Modifier Or physique' });
+    await user.click(rowButton);
+    await user.click(screen.getByRole('button', { name: 'Ajouter un mouvement' }));
+    expect(screen.getByRole('dialog', { name: 'Mouvement · Or physique' })).toBeInTheDocument();
+    return rowButton;
+  }
+
+  it('Échap rend le focus à la ligne d’actif', async () => {
+    const user = userEvent.setup();
+    setup();
+    const rowButton = await openMovement(user);
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(rowButton).toHaveFocus();
+  });
+
+  it('Annuler rend le focus à la ligne d’actif', async () => {
+    const user = userEvent.setup();
+    setup();
+    const rowButton = await openMovement(user);
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Annuler' }));
+    expect(rowButton).toHaveFocus();
+  });
+
+  it('un enregistrement réussi rend le focus à la ligne d’actif', async () => {
+    const user = userEvent.setup();
+    setup();
+    const rowButton = await openMovement(user);
+    const dialog = screen.getByRole('dialog');
+    await user.type(within(dialog).getByLabelText('Poids fin (g)'), '2');
+    await user.type(within(dialog).getByLabelText('Montant (EUR)'), '300');
+    await user.click(within(dialog).getByRole('button', { name: 'Enregistrer' }));
+    await vi.waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(rowButton).toHaveFocus();
+  });
+
+  it('si la ligne a disparu, le focus se replie sur le bouton Ajouter', async () => {
+    const user = userEvent.setup();
+    const { rerender } = setup();
+    await openMovement(user);
+    rerender(
+      <DisplayProvider fx={fixtureDashboard.fx}>
+        <PatrimoineView data={{ ...fixtureDashboard, assets: fixtureDashboard.assets.filter((a) => a.id !== 'or') }} actions={actions} />
+      </DisplayProvider>,
+    );
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Ajouter' })).toHaveFocus();
   });
 });

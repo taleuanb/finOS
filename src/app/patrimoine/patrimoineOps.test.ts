@@ -339,3 +339,112 @@ describe('crédits', () => {
     expect(console.error).toHaveBeenCalled();
   });
 });
+
+describe('correctifs — quantité d’un mouvement (pas d’arrondi au centime)', () => {
+  const base = { assetId: 'crypto', kind: 'buy', date: '2026-11-03', amount: 50 } as const;
+
+  it('conserve une quantité de crypto de 0,00012', async () => {
+    expect((await addMovementWith(repo, { ...base, quantity: 0.00012 }, NOW)).ok).toBe(true);
+    expect((await repo.listMovements()).at(-1)!.quantity).toBe(0.00012);
+  });
+
+  it('conserve un poids fin de métal à trois décimales', async () => {
+    expect((await addMovementWith(repo, { assetId: 'or', kind: 'buy', date: '2026-11-03', amount: 400, quantity: 3.125 }, NOW)).ok).toBe(true);
+    expect((await repo.listMovements()).at(-1)!.quantity).toBe(3.125);
+  });
+
+  it('arrondit à 8 décimales au plus', async () => {
+    await addMovementWith(repo, { ...base, quantity: 0.123456789123 }, NOW);
+    expect((await repo.listMovements()).at(-1)!.quantity).toBe(0.12345679);
+  });
+
+  it('un métal à 0,004 g reste strictement positif (non tronqué à 0)', async () => {
+    expect((await addMovementWith(repo, { assetId: 'or', kind: 'buy', date: '2026-11-03', amount: 1, quantity: 0.004 }, NOW)).ok).toBe(true);
+    expect((await repo.listMovements()).at(-1)!.quantity).toBe(0.004);
+  });
+
+  it.each([['NaN', Number.NaN], ['négative', -0.5], ['> 1 000 000 000', 1_000_000_001], ['infinie', Number.POSITIVE_INFINITY]])(
+    'refuse une quantité %s sans rien écrire', async (_l, quantity) => {
+      const before = (await repo.listMovements()).length;
+      expect((await addMovementWith(repo, { ...base, quantity }, NOW)).ok).toBe(false);
+      expect((await repo.listMovements()).length).toBe(before);
+    },
+  );
+});
+
+describe('correctifs — archivage d’un actif utilisé par la Stratégie', () => {
+  const MSG = 'Cet actif est utilisé par ta Stratégie : change-le d’abord dans Stratégie.';
+
+  it.each([['or'], ['ag'], ['epargne'], ['per'], ['syla']])(
+    'refuse d’archiver %s (référencé par la Stratégie) sans rien écrire', async (id) => {
+      const spy = vi.spyOn(repo, 'updateAsset');
+      expect(await archiveAssetWith(repo, id, true)).toEqual({ ok: false, error: MSG });
+      expect(spy).not.toHaveBeenCalled();
+    },
+  );
+
+  it('archive un actif non référencé', async () => {
+    expect(await archiveAssetWith(repo, 'lcl', true)).toEqual({ ok: true });
+  });
+
+  it('ne bloque jamais le désarchivage', async () => {
+    await repo.updateAsset('or', { archived: true });
+    expect(await archiveAssetWith(repo, 'or', false)).toEqual({ ok: true });
+    expect((await repo.listAssets()).find((a) => a.id === 'or')!.archived).toBe(false);
+  });
+});
+
+describe('correctifs — modification d’un actif', () => {
+  it('refuse de changer la devise (les montants seraient réinterprétés), sans rien écrire', async () => {
+    const spy = vi.spyOn(repo, 'updateAsset');
+    const res = await updateAssetWith(repo, 'dar-sakan', { currency: 'EUR' }, NOW);
+    expect(res).toEqual({ ok: false, error: expect.stringMatching(/devise/i) });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('accepte une devise identique sans l’écrire', async () => {
+    const spy = vi.spyOn(repo, 'updateAsset');
+    expect(await updateAssetWith(repo, 'dar-sakan', { currency: 'MAD', name: 'Dar Sakan 2' }, NOW)).toEqual({ ok: true });
+    expect(spy).toHaveBeenCalledWith('dar-sakan', { name: 'Dar Sakan 2' });
+  });
+
+  it('une valeur manuelle modifiée sans date reçoit la date du jour (Paris)', async () => {
+    const spy = vi.spyOn(repo, 'updateAsset');
+    expect(await updateAssetWith(repo, 'lcl', { manualValue: 5000 }, NOW)).toEqual({ ok: true });
+    expect(spy).toHaveBeenCalledWith('lcl', { manualValue: 5000, manualValueDate: '2026-11-05' });
+  });
+
+  it('une valeur modifiée avec sa date garde la date fournie', async () => {
+    const spy = vi.spyOn(repo, 'updateAsset');
+    await updateAssetWith(repo, 'lcl', { manualValue: 5000, manualValueDate: '2026-11-01' }, NOW);
+    expect(spy).toHaveBeenCalledWith('lcl', { manualValue: 5000, manualValueDate: '2026-11-01' });
+  });
+
+  it('renommer un ancien actif manuel sans valeur n’est pas bloqué (et n’écrit que le nom)', async () => {
+    const id = await repo.createAsset({ name: 'Vieux', assetClass: 'Autres', currency: 'EUR', mode: 'manual' });
+    const spy = vi.spyOn(repo, 'updateAsset');
+    expect(await updateAssetWith(repo, id, { name: 'Nouveau nom' }, NOW)).toEqual({ ok: true });
+    expect(spy).toHaveBeenCalledWith(id, { name: 'Nouveau nom' });
+  });
+
+  it('garde les règles croisées quand le mode, la cotation ou la classe sont modifiés', async () => {
+    const id = await repo.createAsset({ name: 'Vieux', assetClass: 'Autres', currency: 'EUR', mode: 'manual' });
+    expect((await updateAssetWith(repo, id, { mode: 'auto' }, NOW)).ok).toBe(false);
+    expect((await updateAssetWith(repo, 'or', { quoteId: 'bitcoin' }, NOW)).ok).toBe(false);
+    expect((await updateAssetWith(repo, 'etf-revolut', { assetClass: 'Métaux précieux' }, NOW)).ok).toBe(false);
+  });
+});
+
+describe('correctifs — devise d’un crédit', () => {
+  it('refuse de changer la devise d’un crédit sans rien écrire', async () => {
+    const spy = vi.spyOn(repo, 'updateDebt');
+    expect(await updateDebtWith(repo, 'credit-dar-sakan', { currency: 'EUR' })).toEqual({ ok: false, error: expect.stringMatching(/devise/i) });
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('accepte une devise identique sans l’écrire', async () => {
+    const spy = vi.spyOn(repo, 'updateDebt');
+    expect(await updateDebtWith(repo, 'credit-dar-sakan', { currency: 'MAD', monthly: 10 })).toEqual({ ok: true });
+    expect(spy).toHaveBeenCalledWith('credit-dar-sakan', { monthly: 10 });
+  });
+});

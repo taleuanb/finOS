@@ -1,12 +1,12 @@
 'use client';
 
 import { useId, useState, type FormEvent } from 'react';
-import type { ActionResult, MovementInput } from '@/app/patrimoine/patrimoineOps';
+import { isRealDate, type ActionResult, type MovementInput } from '@/app/patrimoine/patrimoineOps';
 import { parisDate } from '@/domain/dates';
 import type { Asset } from '@/domain/types';
 import { BottomSheet } from '@/ui/BottomSheet';
 import { Segmented } from '@/ui/Segmented';
-import { AmountInput, CURRENCY_SYMBOL, Field, SheetFooter, inputClass, isIsoDate, parseDecimal, useSubmit } from './formKit';
+import { AmountInput, CURRENCY_SYMBOL, Field, SheetFooter, inputClass, parseDecimal, useSubmit } from './formKit';
 
 export interface MovementSheetActions {
   add: (m: MovementInput) => Promise<ActionResult>;
@@ -36,7 +36,7 @@ export function MovementSheet({ asset, actions, onClose, onDone }: {
   const submit = (e: FormEvent) => {
     e.preventDefault();
     const errs: Partial<Record<FieldKey, string>> = {};
-    if (!isIsoDate(date)) errs.date = 'Date invalide';
+    if (!isRealDate(date)) errs.date = 'Date invalide';
     const q = quantity.trim() === '' ? (isMetal ? null : 0) : parseDecimal(quantity);
     if (q === null || (isMetal && q <= 0)) errs.quantity = isMetal ? 'Poids fin requis (grammes, supérieur à 0)' : 'Quantité invalide';
     const a = parseDecimal(amount);

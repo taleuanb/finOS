@@ -121,3 +121,26 @@ describe('MovementSheet', () => {
     expect(field('Poids fin (g)')).toHaveAttribute('type', 'password');
   });
 });
+
+describe('MovementSheet — quantités décimales', () => {
+  it('envoie 0,00012 (crypto) sans arrondi', async () => {
+    const { user, add } = setup('crypto');
+    await user.type(field('Quantité (parts / unités)'), '0,00012');
+    await user.type(field('Montant (EUR)'), '5');
+    await user.click(screen.getByRole('button', { name: 'Enregistrer' }));
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ assetId: 'crypto', quantity: 0.00012, amount: 5 }));
+  });
+
+  it('envoie un poids fin à trois décimales (3,125 g)', async () => {
+    const { user, add } = setup('or');
+    await user.type(field('Poids fin (g)'), '3,125');
+    await user.type(field('Montant (EUR)'), '400');
+    await user.click(screen.getByRole('button', { name: 'Enregistrer' }));
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ assetId: 'or', quantity: 3.125 }));
+  });
+
+  it('la quantité utilise le clavier décimal', () => {
+    setup('crypto');
+    expect(field('Quantité (parts / unités)')).toHaveAttribute('inputmode', 'decimal');
+  });
+});

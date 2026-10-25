@@ -1,8 +1,8 @@
 'use client';
 
 import { useId, useRef, useState, type ReactNode } from 'react';
+import { CURRENCIES, type ActionResult } from '@/app/patrimoine/patrimoineOps';
 import type { Currency } from '@/domain/types';
-import type { ActionResult } from '@/app/patrimoine/patrimoineOps';
 import { useDisplay } from '@/ui/display';
 
 /** Éléments communs aux feuilles de formulaire (actif, mouvement, crédit). */
@@ -17,15 +17,6 @@ export function parseDecimal(text: string): number | null {
   if (!/^\d+([.,]\d+)?$/.test(t)) return null;
   const n = Number(t.replace(',', '.'));
   return Number.isFinite(n) ? n : null;
-}
-
-/** Date saisie (`type="date"`) : 'AAAA-MM-JJ' réelle ou non. */
-export function isIsoDate(s: string): boolean {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-  if (!m) return false;
-  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  const t = new Date(Date.UTC(y, mo - 1, d));
-  return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d;
 }
 
 export const inputClass =
@@ -51,6 +42,21 @@ export function Field({ label, error, hint, suffix, children }: {
       {hint ? <p id={hintId} className="text-xs text-muted">{hint}</p> : null}
       {error ? <p id={errId} className="text-xs font-semibold text-loss">{error}</p> : null}
     </div>
+  );
+}
+
+/** Devise : liste à la création ; ensuite valeur en lecture seule (les montants saisis seraient réinterprétés). */
+export function CurrencyField({ value, onChange, locked }: { value: Currency; onChange: (c: Currency) => void; locked: boolean }) {
+  return (
+    <Field label="Devise" hint={locked ? 'La devise ne peut plus être modifiée après la création.' : undefined}>
+      {(a) => locked ? (
+        <input {...a} type="text" readOnly value={value} className={`${inputClass} bg-card text-muted`} />
+      ) : (
+        <select {...a} value={value} onChange={(e) => onChange(e.target.value as Currency)} className={inputClass}>
+          {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+        </select>
+      )}
+    </Field>
   );
 }
 
@@ -132,14 +138,15 @@ export function SheetFooter({ formId, pending, error, onCancel }: {
 }
 
 /** Bouton secondaire de la feuille (Archiver, Supprimer, Ajouter un mouvement). */
-export function SecondaryButton({ children, onClick, disabled, danger }: {
-  children: ReactNode; onClick: () => void; disabled?: boolean; danger?: boolean;
+export function SecondaryButton({ children, onClick, disabled, danger, describedBy }: {
+  children: ReactNode; onClick: () => void; disabled?: boolean; danger?: boolean; describedBy?: string;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
+      aria-describedby={describedBy}
       className={`min-h-11 w-full rounded-full border border-border text-[14px] font-bold disabled:opacity-50 ${danger ? 'text-loss' : ''}`}
     >
       {children}

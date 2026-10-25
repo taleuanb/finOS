@@ -309,3 +309,37 @@ describe('AssetSheet — édition', () => {
     expect(screen.getByRole('button', { name: 'Auto', pressed: true })).toBeInTheDocument();
   });
 });
+
+describe('AssetSheet — correctifs', () => {
+  it('la devise est figée en modification : valeur en lecture seule, plus de liste', () => {
+    setup({ asset: asset('dar-sakan') });
+    const currency = field('Devise');
+    expect(currency.tagName).toBe('INPUT');
+    expect(currency).toHaveAttribute('readonly');
+    expect(currency).toHaveValue('MAD');
+    expect(screen.getByText(/ne peut plus être modifiée/)).toBeInTheDocument();
+  });
+
+  it('à la création la devise reste modifiable', () => {
+    setup();
+    expect(field('Devise').tagName).toBe('SELECT');
+  });
+
+  it('« Ajouter un mouvement » est désactivé tant que le formulaire a des modifications non enregistrées', async () => {
+    const onAddMovement = vi.fn();
+    const { user } = setup({ asset: asset('lcl'), onAddMovement });
+    const add = screen.getByRole('button', { name: 'Ajouter un mouvement' });
+    expect(add).toBeEnabled();
+    expect(screen.queryByText('Enregistre d’abord tes modifications')).toBeNull();
+
+    await user.type(field('Sous-type'), 'x');
+    expect(add).toBeDisabled();
+    expect(screen.getByText('Enregistre d’abord tes modifications')).toBeInTheDocument();
+    expect(add).toHaveAccessibleDescription('Enregistre d’abord tes modifications');
+    await user.click(add);
+    expect(onAddMovement).not.toHaveBeenCalled();
+
+    await user.clear(field('Sous-type'));
+    expect(add).toBeEnabled();
+  });
+});

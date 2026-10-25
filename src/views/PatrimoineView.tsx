@@ -217,7 +217,7 @@ function FilterSheet({
 const ADD_BUTTON_CLASS =
   'inline-flex min-h-11 items-center gap-1.5 rounded-full bg-accent px-4 text-[13px] font-bold text-[#1A1A1A]';
 
-function PositionRow({ row, onOpen }: { row: RowModel; onOpen: () => void }) {
+function PositionRow({ row, onOpen }: { row: RowModel; onOpen: (opener: HTMLElement) => void }) {
   const { hidden } = useDisplay();
   const badge = perfBadge(row.gainPct);
   return (
@@ -226,7 +226,7 @@ function PositionRow({ row, onOpen }: { row: RowModel; onOpen: () => void }) {
         type="button"
         aria-label={`Modifier ${row.name}`}
         aria-haspopup="dialog"
-        onClick={onOpen}
+        onClick={(e) => onOpen(e.currentTarget)}
         className="flex min-h-11 w-full items-center gap-3 px-4 py-3.5 text-left"
       >
         <span
@@ -261,6 +261,10 @@ export function PatrimoineView({ data, actions }: { data: Dashboard; actions: Pa
   const [filters, setFilters] = useState<Filters>(NO_FILTER);
   const [openSheet, setOpenSheet] = useState<FilterKey | null>(null);
   const [form, setForm] = useState<FormSheet | null>(null);
+  // Ligne qui a ouvert la feuille et bouton Ajouter (repli) : le focus leur revient quand la saisie d'un mouvement se ferme.
+  const rowOpener = useRef<HTMLElement | null>(null);
+  const addButton = useRef<HTMLButtonElement>(null);
+  const previousForm = useRef<FormSheet | null>(null);
 
   // Écriture réussie : la feuille se ferme (le focus revient à la ligne ouverte) et la route est relue.
   const done = () => {
@@ -271,6 +275,20 @@ export function PatrimoineView({ data, actions }: { data: Dashboard; actions: Pa
   const editedAsset = form?.kind === 'asset' ? assetById(form.id) : undefined;
   const movementAsset = form?.kind === 'movement' ? assetById(form.assetId) : undefined;
   const editedDebt = form?.kind === 'debt' ? data.debts.find((d) => d.id === form.id) : undefined;
+
+  // La ligne ouverte a disparu des données : plus de feuille à afficher.
+  const movementGone = form?.kind === 'movement' && !movementAsset;
+  useEffect(() => { if (movementGone) setForm(null); }, [movementGone]);
+
+  // La feuille de mouvement s'ouvre depuis la feuille d'édition (déjà démontée) : BottomSheet ne retrouve plus son
+  // déclencheur. À la fermeture (succès, Échap, Annuler), le focus revient à la ligne, sinon au bouton Ajouter.
+  useEffect(() => {
+    const was = previousForm.current;
+    previousForm.current = form;
+    if (was?.kind !== 'movement' || form !== null) return;
+    const row = rowOpener.current;
+    (row?.isConnected ? row : addButton.current)?.focus();
+  }, [form]);
 
   const options: Record<FilterKey, string[]> = useMemo(() => ({
     types: distinct(data.assets.map((a) => a.assetClass)),
@@ -314,6 +332,7 @@ export function PatrimoineView({ data, actions }: { data: Dashboard; actions: Pa
           ))}
         </div>
         <button
+          ref={addButton}
           type="button"
           aria-haspopup="dialog"
           onClick={() => setForm(tab === 'actifs' ? { kind: 'asset' } : { kind: 'debt' })}
@@ -375,7 +394,10 @@ export function PatrimoineView({ data, actions }: { data: Dashboard; actions: Pa
               <PositionRow
                 key={r.id}
                 row={r}
-                onOpen={() => setForm(tab === 'actifs' ? { kind: 'asset', id: r.id } : { kind: 'debt', id: r.id })}
+                onOpen={(opener) => {
+                  rowOpener.current = opener;
+                  setForm(tab === 'actifs' ? { kind: 'asset', id: r.id } : { kind: 'debt', id: r.id });
+                }}
               />
             ))}
           </ul>

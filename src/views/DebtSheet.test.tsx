@@ -174,3 +174,18 @@ describe('DebtSheet — édition', () => {
     expect(onDone).not.toHaveBeenCalled();
   });
 });
+
+describe('DebtSheet — correctifs', () => {
+  it('la devise est figée en modification : valeur en lecture seule', () => {
+    setup({ debt });
+    const currency = field('Devise');
+    expect(currency.tagName).toBe('INPUT');
+    expect(currency).toHaveAttribute('readonly');
+    expect(currency).toHaveValue('MAD');
+  });
+
+  it('à la création la devise reste modifiable', () => {
+    setup();
+    expect(field('Devise').tagName).toBe('SELECT');
+  });
+});

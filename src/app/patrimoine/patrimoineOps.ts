@@ -45,7 +45,7 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 
 const DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 /** Vrai pour une date calendaire réelle 'AAAA-MM-JJ' (refuse 2026-13-45 et 2026-02-30). */
-function isRealDate(s: unknown): s is string {
+export function isRealDate(s: unknown): s is string {
   if (typeof s !== 'string') return false;
   const m = DATE_RE.exec(s);
   if (!m) return false;
@@ -66,6 +66,12 @@ function readAmount(v: unknown, error: string, opts: { positive?: boolean } = {}
   return opts.positive && n <= 0 ? bad(error) : good(n);
 }
 
+/** Quantité (parts, tokens, grammes fins) : finie dans [0, 1 000 000 000], arrondie à 8 décimales, jamais au centime. */
+function readQuantity(v: unknown, error: string): Parsed<number> {
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0 || v > MAX_AMOUNT) return bad(error);
+  return good(Math.round(v * 1e8) / 1e8);
+}
+
 // ---------------------------------------------------------------------------
 // Actifs
 
@@ -75,38 +81,50 @@ const ASSET_KEYS = [
 ] as const satisfies readonly (keyof AssetInput)[];
 const ASSET_REQUIRED: readonly string[] = ['name', 'assetClass', 'currency', 'mode'];
 
-/** Valide un actif complet (champs inconnus ignorés) et le renvoie normalisé. */
-function parseAsset(raw: unknown, now: Date): Parsed<AssetInput> {
+/**
+ * Valide un actif complet (champs inconnus ignorés) et le renvoie normalisé.
+ * `touched` (modification) : seuls les champs modifiés, et les règles croisées qui les concernent, sont imposés ;
+ * un ancien actif incomplet (valeur manuelle vide…) reste renommable. Sans `touched` (création), tout est imposé.
+ */
+function parseAsset(raw: unknown, now: Date, touched?: ReadonlySet<string>): Parsed<AssetInput> {
   if (!isObject(raw)) return bad('Données invalides');
+  const enforce = (...keys: string[]) => !touched || keys.some((k) => touched.has(k));
+
   const name = readText(raw.name, 'Nom requis (200 caractères maximum)', MAX_TEXT);
-  if (!name.ok) return name;
+  if (!name.ok && enforce('name')) return name;
   if (!ASSET_CLASSES.includes(raw.assetClass as never)) return bad('Classe invalide');
   if (!CURRENCIES.includes(raw.currency as Currency)) return bad('Devise invalide');
   if (raw.mode !== 'auto' && raw.mode !== 'manual') return bad('Mode de valorisation invalide');
   const assetClass = raw.assetClass as AssetInput['assetClass'];
   const mode = raw.mode;
-  const out: AssetInput = { name: name.value, assetClass, currency: raw.currency as Currency, mode };
+  const out: AssetInput = { name: name.ok ? name.value : String(raw.name ?? ''), assetClass, currency: raw.currency as Currency, mode };
 
   if (raw.subtype != null && raw.subtype !== '') {
     const subtype = readText(raw.subtype, 'Sous-type invalide', MAX_TEXT);
-    if (!subtype.ok) return subtype;
-    out.subtype = subtype.value;
+    if (!subtype.ok && enforce('subtype')) return subtype;
+    if (subtype.ok) out.subtype = subtype.value;
   }
   if (raw.institution != null) {
     const institution = readText(raw.institution, `Établissement invalide (${MAX_INSTITUTION} caractères maximum)`, MAX_INSTITUTION);
-    if (!institution.ok) return institution;
-    out.institution = institution.value;
+    if (!institution.ok && enforce('institution')) return institution;
+    if (institution.ok) out.institution = institution.value;
   }
 
   const quoteRaw = raw.quoteId == null || raw.quoteId === '' ? undefined : raw.quoteId;
   if (quoteRaw !== undefined || mode === 'auto') {
     const quote = readText(quoteRaw, 'Identifiant de cotation requis pour une valorisation Auto', MAX_QUOTE_ID);
-    if (!quote.ok) return quote;
-    if (/\s/.test(quote.value)) return bad('Identifiant de cotation invalide');
-    if (mode === 'auto' && assetClass === METALS) {
+    const crossRules = enforce('quoteId', 'mode', 'assetClass'); // Auto ⇒ cotation ; métal ⇒ XAU / XAG
+    if (!quote.ok) {
+      if (crossRules) return quote;
+    } else if (/\s/.test(quote.value)) {
+      if (enforce('quoteId')) return bad('Identifiant de cotation invalide');
+    } else if (mode === 'auto' && assetClass === METALS) {
       const code = quote.value.toUpperCase();
-      if (!METAL_QUOTES.includes(code)) return bad('Pour un métal précieux en Auto, l’identifiant doit être XAU (or) ou XAG (argent)');
-      out.quoteId = code;
+      if (!METAL_QUOTES.includes(code)) {
+        if (crossRules) return bad('Pour un métal précieux en Auto, l’identifiant doit être XAU (or) ou XAG (argent)');
+      } else {
+        out.quoteId = code;
+      }
     } else {
       out.quoteId = quote.value;
     }
@@ -114,26 +132,32 @@ function parseAsset(raw: unknown, now: Date): Parsed<AssetInput> {
 
   if (raw.manualValue != null) {
     const value = readAmount(raw.manualValue, 'Valeur manuelle invalide');
-    if (!value.ok) return value;
-    out.manualValue = value.value;
-  } else if (mode === 'manual') {
+    if (!value.ok && enforce('manualValue')) return value;
+    if (value.ok) out.manualValue = value.value;
+  } else if (mode === 'manual' && enforce('mode', 'manualValue')) {
     return bad('Valeur manuelle requise');
   }
   if (raw.manualValueDate != null) {
-    if (!isRealDate(raw.manualValueDate)) return bad('Date de valeur invalide');
-    out.manualValueDate = raw.manualValueDate;
+    if (!isRealDate(raw.manualValueDate)) {
+      if (enforce('manualValueDate')) return bad('Date de valeur invalide');
+    } else {
+      out.manualValueDate = raw.manualValueDate;
+    }
   } else if (out.manualValue !== undefined) {
     out.manualValueDate = parisDate(now);
   }
 
   if (raw.fixedMonthly != null) {
     const monthly = readAmount(raw.fixedMonthly, 'Versement mensuel invalide');
-    if (!monthly.ok) return monthly;
-    out.fixedMonthly = monthly.value;
+    if (!monthly.ok && enforce('fixedMonthly')) return monthly;
+    if (monthly.ok) out.fixedMonthly = monthly.value;
   }
   if (raw.archived != null) {
-    if (typeof raw.archived !== 'boolean') return bad('Archivage invalide');
-    out.archived = raw.archived;
+    if (typeof raw.archived !== 'boolean') {
+      if (enforce('archived')) return bad('Archivage invalide');
+    } else {
+      out.archived = raw.archived;
+    }
   }
   return good(out);
 }
@@ -157,12 +181,17 @@ export async function updateAssetWith(repo: Repo, id: unknown, patch: unknown, n
     const existing = (await repo.listAssets()).find((a) => a.id === id);
     if (!existing) return bad(ASSET_NOT_FOUND);
 
+    // La devise est figée à la création : les montants déjà saisis seraient réinterprétés.
+    if (patch.currency != null && patch.currency !== existing.currency) {
+      return bad('La devise ne peut pas être modifiée après la création de l’actif.');
+    }
+
     // Les règles croisées (Auto ⇒ cotation…) se vérifient sur l'actif tel qu'il serait après modification.
+    const keys = ASSET_KEYS.filter((k) => k !== 'currency' && patch[k] !== undefined);
     const candidate: Record<string, unknown> = {};
     for (const k of ASSET_KEYS) if (existing[k] !== undefined) candidate[k] = existing[k];
-    for (const k of ASSET_KEYS) {
+    for (const k of keys) {
       const v = patch[k];
-      if (v === undefined) continue;
       if (v === null) {
         if (ASSET_REQUIRED.includes(k)) return bad('Champ obligatoire');
         delete candidate[k];
@@ -170,15 +199,18 @@ export async function updateAssetWith(repo: Repo, id: unknown, patch: unknown, n
         candidate[k] = v;
       }
     }
-    const parsed = parseAsset(candidate, now);
+    // Valeur manuelle modifiée sans date : elle date d'aujourd'hui (même contrat qu'à la création).
+    const written: string[] = [...keys];
+    if (patch.manualValue != null && patch.manualValueDate === undefined) {
+      candidate.manualValueDate = parisDate(now);
+      written.push('manualValueDate');
+    }
+    const parsed = parseAsset(candidate, now, new Set(written));
     if (!parsed.ok) return parsed;
 
     // On n'écrit que les clés de saisie fournies, avec leur valeur normalisée (jamais un champ inconnu).
     const write: Record<string, unknown> = {};
-    for (const k of ASSET_KEYS) if (patch[k] !== undefined) write[k] = parsed.value[k] ?? null;
-    if (write.manualValueDate === undefined && parsed.value.manualValueDate && parsed.value.manualValueDate !== existing.manualValueDate) {
-      write.manualValueDate = parsed.value.manualValueDate; // date du jour appliquée à une valeur sans date
-    }
+    for (const k of written) write[k] = parsed.value[k as keyof AssetInput] ?? null;
     if (Object.keys(write).length > 0) await repo.updateAsset(id, write as AssetPatch);
     return { ok: true };
   } catch (e) {
@@ -192,6 +224,12 @@ export async function archiveAssetWith(repo: Repo, id: unknown, archived: unknow
   if (typeof archived !== 'boolean') return bad('Archivage invalide');
   try {
     if (!(await repo.listAssets()).some((a) => a.id === id)) return bad(ASSET_NOT_FOUND);
+    if (archived) {
+      // Un actif désigné par la Stratégie (or, argent, épargne, actif principal d'une classe) ne s'archive pas.
+      const strategy = await repo.getStrategy();
+      const used = [strategy.goldAssetId, strategy.silverAssetId, strategy.savingsAssetId, ...Object.values(strategy.mainAssetByClass)];
+      if (used.includes(id)) return bad('Cet actif est utilisé par ta Stratégie : change-le d’abord dans Stratégie.');
+    }
     await repo.updateAsset(id, { archived });
     return { ok: true };
   } catch (e) {
@@ -210,7 +248,7 @@ export async function addMovementWith(repo: Repo, input: unknown, now: Date = ne
   const kind = input.kind;
   const date = input.date == null || input.date === '' ? parisDate(now) : input.date;
   if (!isRealDate(date)) return bad('Date invalide');
-  const quantity = input.quantity == null ? good(0) : readAmount(input.quantity, 'Quantité invalide');
+  const quantity = input.quantity == null ? good(0) : readQuantity(input.quantity, 'Quantité invalide');
   if (!quantity.ok) return quantity;
   const amount = readAmount(input.amount, 'Le montant doit être supérieur à 0', { positive: true });
   if (!amount.ok) return amount;
@@ -255,6 +293,7 @@ const DEBT_FIELDS: Record<keyof DebtInput, DebtField> = {
   currency: { required: true, parse: (v) => (CURRENCIES.includes(v as Currency) ? good(v) : bad('Devise invalide')) },
   outstanding: { required: true, parse: (v) => readAmount(v, 'Capital restant dû invalide') },
   rate: {
+    // Nombre simple dans Notion (colonne « Taux » : `number` sans format), stocké tel que saisi : 3,9 = 3,9 %.
     required: false,
     parse: (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 100 ? good(Math.round(v * 10_000) / 10_000) : bad('Taux invalide (entre 0 et 100 %)')),
   },
@@ -304,7 +343,13 @@ export async function updateDebtWith(repo: Repo, id: unknown, patch: unknown): P
   }
   try {
     // L'id vient du client : il doit désigner un crédit de la base Dettes.
-    if (!(await repo.listDebts()).some((d) => d.id === id)) return bad(DEBT_NOT_FOUND);
+    const existing = (await repo.listDebts()).find((d) => d.id === id);
+    if (!existing) return bad(DEBT_NOT_FOUND);
+    // La devise est figée à la création : les montants déjà saisis seraient réinterprétés.
+    if (write.currency !== undefined && write.currency !== existing.currency) {
+      return bad('La devise ne peut pas être modifiée après la création du crédit.');
+    }
+    delete write.currency;
     if (write.financedAssetId && !(await repo.listAssets()).some((a) => a.id === write.financedAssetId)) return bad(ASSET_NOT_FOUND);
     if (Object.keys(write).length > 0) await repo.updateDebt(id, write as DebtPatch);
     return { ok: true };

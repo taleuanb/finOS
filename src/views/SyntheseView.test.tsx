@@ -113,3 +113,15 @@ describe('SyntheseView', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Données du 25 octobre 2026');
   });
 });
+
+describe('SyntheseView — mode démo (I9)', () => {
+  it('affiche le bandeau « Données de démonstration » quand le FakeRepo est actif', () => {
+    renderView({ ...fixtureDashboard, demo: true });
+    expect(screen.getByText(/Données de démonstration/)).toBeInTheDocument();
+  });
+  it('pas de bandeau avec Notion', () => {
+    renderView({ ...fixtureDashboard, demo: false });
+    expect(screen.queryByText(/Données de démonstration/)).not.toBeInTheDocument();
+  });
+});
+

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FakeRepo } from './fakeRepo';
-import { getRepo } from './index';
+import { getRepo, isDemo } from './index';
 
 const DB_VARS = [
   'NOTION_DB_ASSETS', 'NOTION_DB_MOVEMENTS', 'NOTION_DB_DEBTS', 'NOTION_DB_BUDGET',
@@ -10,8 +10,17 @@ const DB_VARS = [
 afterEach(() => vi.unstubAllEnvs());
 
 describe('getRepo', () => {
-  it('sans NOTION_TOKEN : un seul FakeRepo par processus, les écritures persistent', async () => {
+  it('I9 : sans NOTION_TOKEN et sans WOS_DEMO=1 : erreur en français (pas de données factices)', () => {
     vi.stubEnv('NOTION_TOKEN', '');
+    vi.stubEnv('WOS_DEMO', '');
+    expect(() => getRepo()).toThrow(/NOTION_TOKEN.*WOS_DEMO=1/);
+    expect(isDemo()).toBe(false);
+  });
+
+  it('sans NOTION_TOKEN avec WOS_DEMO=1 : un seul FakeRepo par processus, les écritures persistent', async () => {
+    vi.stubEnv('NOTION_TOKEN', '');
+    vi.stubEnv('WOS_DEMO', '1');
+    expect(isDemo()).toBe(true);
     const a = getRepo();
     expect(a).toBeInstanceOf(FakeRepo);
     expect(getRepo()).toBe(a);
@@ -29,8 +38,10 @@ describe('getRepo', () => {
     expect(() => getRepo()).not.toThrow(/NOTION_DB_ASSETS/);
   });
 
-  it('avec NOTION_TOKEN et toutes les variables : renvoie le Repo Notion (pas le FakeRepo)', () => {
+  it('avec NOTION_TOKEN et toutes les variables : renvoie le Repo Notion (pas le FakeRepo), même avec WOS_DEMO=1', () => {
     vi.stubEnv('NOTION_TOKEN', 'secret_test');
+    vi.stubEnv('WOS_DEMO', '1');
+    expect(isDemo()).toBe(false);
     for (const v of DB_VARS) vi.stubEnv(v, `ds-${v}`);
     const repo = getRepo();
     expect(repo).not.toBeInstanceOf(FakeRepo);

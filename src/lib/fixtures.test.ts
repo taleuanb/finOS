@@ -1,6 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fixtureDashboard as d } from './fixtures';
 import { getRepo } from '@/notion';
+
+afterEach(() => vi.unstubAllEnvs());
 
 describe('fixtureDashboard', () => {
   it('est cohérent avec les maquettes', () => {
@@ -26,7 +28,9 @@ describe('fixtureDashboard', () => {
     expect(d.topPerformers).toHaveLength(5);
     expect(d.topPerformers[0].id).toBe('domaines');
   });
-  it('getRepo sert les données des maquettes', async () => {
+  it('getRepo sert les données des maquettes (mode démo)', async () => {
+    vi.stubEnv('NOTION_TOKEN', '');
+    vi.stubEnv('WOS_DEMO', '1');
     expect(await getRepo().listAssets()).toHaveLength(19);
   });
 });

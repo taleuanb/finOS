@@ -27,6 +27,7 @@ export interface DashboardInput {
   assets: Asset[]; movements: Movement[]; debts: Debt[]; budget: BudgetLine[];
   strategy: Strategy; plan: PlanLine[]; snapshots: Snapshot[];
   series: DashboardSeries | null; now: Date;
+  demo?: boolean;                                   // FakeRepo actif (WOS_DEMO=1)
 }
 
 const STALE_AFTER_MS = 36 * 3_600_000;
@@ -265,7 +266,7 @@ export function buildDashboard(i: DashboardInput): Dashboard {
   const splitOf = (id: string | undefined) => sum(splitLines.filter((l) => id !== undefined && l.assetId === id).map((l) => l.amount));
 
   return {
-    asOf: today, lastSyncOk, stale, fx, strategy,
+    asOf: today, lastSyncOk, stale, fx, strategy, demo: i.demo ?? false,
     totals: { grossEur, debtsEur, netEur },
     variations,
     history: snapshots.map((s) => ({ date: s.date, netEur: s.netEur })),

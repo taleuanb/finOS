@@ -1,6 +1,6 @@
 import { unstable_cache } from 'next/cache';
 import type { MetalZone } from '@/domain/types';
-import { getRepo } from '@/notion';
+import { getRepo, isDemo } from '@/notion';
 import { createYahooProvider, METAL_SYMBOLS } from '@/prices/yahoo';
 import { buildDashboard, type DashboardSeries } from './buildDashboard';
 import type { Dashboard } from './dashboard';
@@ -35,7 +35,9 @@ const cachedDashboard = unstable_cache(
       repo.listAssets(), repo.listMovements(), repo.listDebts(), repo.listBudget(),
       repo.getStrategy(), repo.listPlan(), repo.listSnapshots(), loadSeries(),
     ]);
-    return buildDashboard({ assets, movements, debts, budget, strategy, plan, snapshots, series, now: new Date() });
+    return buildDashboard({
+      assets, movements, debts, budget, strategy, plan, snapshots, series, now: new Date(), demo: isDemo(),
+    });
   },
   ['dashboard'],
   { tags: ['notion'], revalidate: 600 },

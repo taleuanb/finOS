@@ -23,6 +23,7 @@ export type Period = '1M' | 'YTD' | '1A' | 'Tout';
 
 export interface Dashboard {
   asOf: string; lastSyncOk: string | null; stale: boolean; fx: FxRates; strategy: Strategy;
+  demo: boolean;                                    // données de démonstration (FakeRepo, WOS_DEMO=1)
   totals: { grossEur: number; debtsEur: number; netEur: number };
   variations: Record<Period, { abs: number; pct: number } | null>;
   history: { date: string; netEur: number }[];

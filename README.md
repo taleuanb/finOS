@@ -14,13 +14,14 @@ Application personnelle, pensée pour le mobile (colonne de 390 px), qui suit un
 ```bash
 npm install
 cp .env.example .env.local   # puis renseigner au minimum APP_PASSWORD et SESSION_SECRET
-npm run dev
+npm run dev:demo             # données de démonstration (WOS_DEMO=1), sans Notion
+npm run dev                  # avec Notion : NOTION_TOKEN et NOTION_DB_* requis
 ```
 
 - `APP_PASSWORD` : le mot de passe unique de l'application.
 - `SESSION_SECRET` : une chaîne aléatoire d'au moins 32 caractères (par exemple `openssl rand -hex 32`).
 
-Sans `NOTION_TOKEN`, l'app fonctionne **sans Notion** grâce à `FakeRepo` : elle utilise des données de démonstration gardées en mémoire (les écritures persistent tant que le serveur tourne). Ouvrir <http://localhost:3000> et se connecter avec `APP_PASSWORD`.
+`npm run dev` exige les variables Notion (`NOTION_TOKEN` et les `NOTION_DB_*`) : sans `NOTION_TOKEN`, l'app refuse de démarrer les écrans avec une erreur explicite, pour ne jamais afficher de fausses données par oubli. Pour essayer l'app **sans Notion**, lancer `npm run dev:demo` (ou définir `WOS_DEMO=1`) : `FakeRepo` sert alors des données de démonstration gardées en mémoire (les écritures persistent tant que le serveur tourne) et la Synthèse affiche « Données de démonstration ». Ouvrir <http://localhost:3000> et se connecter avec `APP_PASSWORD`.
 
 ## Configuration de Notion
 
@@ -102,4 +103,4 @@ npm run typecheck      # vérification TypeScript
 npm run test:e2e       # test de bout en bout (Playwright)
 ```
 
-Le test de bout en bout construit l'app (`npm run build`), la démarre avec `next start` sur le port 3210 (`E2E_PORT` pour en changer), avec `APP_PASSWORD=test` et sans `NOTION_TOKEN` (donc `FakeRepo`). Il vérifie la redirection vers `/login`, la connexion, la navigation « Budget » et l'absence de défilement horizontal à 390×844 sur les 5 écrans. Il utilise Chromium : si le navigateur de Playwright est absent, exécuter `npx playwright install chromium`, ou pointer `E2E_CHROMIUM_PATH` vers un exécutable Chromium existant.
+Le test de bout en bout construit l'app (`npm run build`), la démarre avec `next start` sur le port 3210 (`E2E_PORT` pour en changer), avec `APP_PASSWORD=test`, sans `NOTION_TOKEN` et avec `WOS_DEMO=1` (donc `FakeRepo`). Il vérifie la redirection vers `/login`, la connexion, la navigation « Budget » et l'absence de défilement horizontal à 390×844 sur les 5 écrans. Il utilise Chromium : si le navigateur de Playwright est absent, exécuter `npx playwright install chromium`, ou pointer `E2E_CHROMIUM_PATH` vers un exécutable Chromium existant.

@@ -378,3 +378,10 @@ describe('buildDashboard : grille or/argent (I10)', () => {
   });
 });
 
+describe('buildDashboard : mode démo (I9)', () => {
+  it('demo vaut false par défaut, true si demandé', () => {
+    expect(buildDashboard(input()).demo).toBe(false);
+    expect(buildDashboard(input({ demo: true })).demo).toBe(true);
+  });
+});
+

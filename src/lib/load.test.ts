@@ -2,13 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { FakeRepo, fixtureSeed } from '@/notion/fakeRepo';
 import { DEFAULT_METAL_GRID } from '@/domain/types';
 
-const state = vi.hoisted(() => ({ repo: null as unknown, getSeries: vi.fn() }));
+const state = vi.hoisted(() => ({ repo: null as unknown, demo: false, getSeries: vi.fn() }));
 
 vi.mock('next/cache', () => ({
   // Sans runtime Next : on exécute la fonction telle quelle, en gardant les options pour les vérifier.
   unstable_cache: vi.fn((fn: (...a: unknown[]) => unknown) => fn),
 }));
-vi.mock('@/notion', () => ({ getRepo: () => state.repo }));
+vi.mock('@/notion', () => ({ getRepo: () => state.repo, isDemo: () => state.demo }));
 vi.mock('@/prices/yahoo', () => ({
   METAL_SYMBOLS: { XAU: 'GC=F', XAG: 'SI=F' },
   createYahooProvider: () => ({ getSeries: state.getSeries }),
@@ -23,6 +23,7 @@ async function freshLoad() {
 
 beforeEach(() => {
   state.repo = new FakeRepo(fixtureSeed);
+  state.demo = false;
   state.getSeries.mockReset();
   state.getSeries.mockImplementation(async (id: string) =>
     id === 'GC=F' ? SERIES : SERIES.map((p) => ({ ...p, close: p.close / 80 })));
@@ -39,6 +40,12 @@ describe('getDashboard', () => {
     ]);
     expect(state.getSeries).toHaveBeenCalledWith('GC=F', '5y', '1wk');
     expect(state.getSeries).toHaveBeenCalledWith('SI=F', '5y', '1wk');
+  });
+
+  it('I9 : expose le mode démo du Repo', async () => {
+    state.demo = true;
+    const { getDashboard } = await freshLoad();
+    expect((await getDashboard()).demo).toBe(true);
   });
 
   it('déclare les caches : dashboard (tag notion, 600 s) et series (tag series, 24 h)', async () => {

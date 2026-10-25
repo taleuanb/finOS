@@ -163,6 +163,11 @@ export function SyntheseView({ data: d }: { data: Dashboard }) {
 
   return (
     <>
+      {d.demo ? (
+        <p className="rounded-2xl border border-border bg-card px-4 py-3 text-[13px] font-semibold text-muted">
+          Données de démonstration : Notion n&apos;est pas connecté (WOS_DEMO=1).
+        </p>
+      ) : null}
       <StaleBanner data={d} />
 
       <section

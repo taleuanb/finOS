@@ -123,7 +123,7 @@ const plan: Dashboard['plan'] = {
 };
 
 export const fixtureDashboard: Dashboard = {
-  asOf: '2026-10-25', lastSyncOk: '2026-10-25T05:00:00.000Z', stale: false, fx, strategy,
+  asOf: '2026-10-25', lastSyncOk: '2026-10-25T05:00:00.000Z', stale: false, fx, strategy, demo: false,
   totals: { grossEur, debtsEur, netEur },
   variations, history, byClass, assets, debts, topPerformers, metals, budget, plan,
 };

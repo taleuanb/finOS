@@ -115,6 +115,11 @@ const movements: Movement[] = [
   mv('mv-ag-3', 'Britannia 1 oz ×3', '2025-06-25', 'ag', 93.309, 81, { nature: 'Pièce' }),
   mv('mv-ag-4', 'Lingot 500 g', '2025-06-25', 'ag', 500, 615, { nature: 'Lingot' }),
   mv('mv-or-3', 'Collier', '2025-11-01', 'or', 0, 1300, { nature: 'Bijou' }), // poids fin manquant
+  // Positions d'ouverture : quantité et prix de revient sont calculés depuis les mouvements (rollups Notion
+  // tronqués au-delà de 25 relations), il faut donc que l'historique couvre la position des actifs suivis.
+  mv('mv-hsbc-0', 'Position initiale', '2025-01-15', 'hsbc', 583.74, cost(22_140, 0.319) - 600, { nature: 'Part' }),
+  mv('mv-per-0', 'Versements antérieurs', '2025-01-15', 'per', 0, cost(21_300, 0.179) - 200, { nature: 'Versement' }),
+  mv('mv-crypto-0', 'Position initiale', '2025-01-15', 'crypto', 0.098, cost(9_870, -0.319) - 200, { nature: 'Token' }),
   // Versements du plan déjà déclarés (octobre et novembre)
   mv('mv-per-10', 'Versement PER', '2026-10-03', 'per', 1, 100, { nature: 'Versement', planMonth: '2026-10' }),
   mv('mv-hsbc-10', 'Achat HSBC', '2026-10-03', 'hsbc', 8.13, 300, { nature: 'Part', planMonth: '2026-10' }),

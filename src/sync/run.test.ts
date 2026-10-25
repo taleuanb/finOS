@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FakeRepo, fixtureSeed } from '@/notion/fakeRepo';
+import { buildDashboard } from '@/lib/buildDashboard';
 import { runSync } from './run';
 import type { FxProvider, FxRates, HistoricalPriceProvider, PriceProvider, Quote } from '@/domain/types';
 
@@ -75,7 +76,8 @@ describe('runSync', () => {
     expect(a.get('crypto')).toMatchObject({ unitPrice: 100_000, value: 10_000, valueEur: 10_000, syncStatus: 'OK' });
     const goldKg = (2700 / OZ_G) * 1000 / 1.1;
     expect(a.get('or')!.unitPrice).toBeCloseTo(goldKg, 6);
-    expect(a.get('or')!.valueEur).toBeCloseTo((24.9 * goldKg) / 1000, 6);
+    // Quantité = somme des mouvements (I12) : 6,4516 g + 6,4516 g + collier 0 g.
+    expect(a.get('or')!.valueEur).toBeCloseTo((12.9032 * goldKg) / 1000, 6);
     expect(a.get('or')!.syncStatus).toBe('OK');
     // Actif manuel en MAD : valeur € recalculée avec le taux du jour (1 € = 10 MAD).
     expect(a.get('dar-sakan')).toMatchObject({ value: 1_200_000, valueEur: 120_000 });
@@ -233,5 +235,30 @@ describe('runSync', () => {
     expect(a.get('crypto')!.syncStatus).toBe('OK');
     expect(a.get('hsbc')!.syncStatus).toMatch(/^⚠ /);
     expect((await repo.listSnapshots()).find((s) => s.date === TODAY)!.goldSilverRatio).toBeNull();
+  });
+
+  it('I12 : quantité et prix de revient calculés depuis les mouvements, pas depuis le rollup tronqué', async () => {
+    const seed = structuredClone(fixtureSeed);
+    seed.assets.find((a) => a.id === 'hsbc')!.quantity = 25; // rollup Notion tronqué à 25 relations
+    const extra = Array.from({ length: 30 }, (_, i) => ({
+      id: `mv-etf-${i}`, label: 'Achat', date: '2026-09-01', assetId: 'etf-revolut', kind: 'buy' as const, quantity: 1, amount: 150,
+    }));
+    seed.movements.push(...extra);
+    seed.assets.find((a) => a.id === 'etf-revolut')!.quantity = 25;
+    const repo = new FakeRepo(seed);
+    await runSync(setup({ repo }).deps);
+    const a = await byId(repo);
+    expect(a.get('hsbc')!.value).toBe(24_000); // 600 parts (mouvements) × 40
+    expect(a.get('etf-revolut')!.value).toBe(30 * 170);
+  });
+
+  it('I3 : le solde Épargne de la synchro et celui du tableau de bord sont identiques', async () => {
+    const { repo, deps } = setup();
+    await runSync(deps);
+    const [assets, movements, debts, budget, strategy, plan, snapshots] = await Promise.all([
+      repo.listAssets(), repo.listMovements(), repo.listDebts(), repo.listBudget(), repo.getStrategy(), repo.listPlan(), repo.listSnapshots(),
+    ]);
+    const d = buildDashboard({ assets, movements, debts, budget, strategy, plan, snapshots, series: null, now: NOW });
+    expect(d.plan.savings.balanceEur).toBeCloseTo(assets.find((a) => a.id === 'epargne')!.valueEur!, 9);
   });
 });

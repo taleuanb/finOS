@@ -2,8 +2,8 @@ import { parisDate } from '@/domain/dates';
 import { buildSnapshot } from '@/domain/history';
 import { goldSilverRatio } from '@/domain/metals';
 import { fromEur, toEur } from '@/domain/money';
-import { estimatedSavingsBalance } from '@/domain/plan';
-import { summarizeBudget } from '@/domain/budget';
+import { withPositions } from '@/domain/positions';
+import { savingsBalanceEur } from '@/domain/savings';
 import { OZ_G, usdPerOzToEurPerKg } from '@/domain/units';
 import { valueAsset } from '@/domain/valuation';
 import type { Repo } from '@/notion/repo';
@@ -73,7 +73,8 @@ export async function runSync(d: {
     repo.listAssets(), repo.getStrategy(), repo.listMovements(), repo.listBudget(),
     repo.listDebts(), repo.listPlan(), repo.listSnapshots(),
   ]);
-  const active = allAssets.filter((a) => !a.archived);
+  // Quantité et prix de revient recalculés depuis les mouvements (les rollups Notion sont tronqués à 25).
+  const active = withPositions(allAssets.filter((a) => !a.archived), movements);
   const lastSnapshot = [...snapshots].sort((a, b) => a.date.localeCompare(b.date)).at(-1);
 
   // Taux de change : à défaut, ceux du dernier instantané.
@@ -148,18 +149,11 @@ export async function runSync(d: {
     }
   }
 
-  // Épargne : dernière saisie manuelle + épargne mensuelle − achats du plan.
+  // Épargne : dernière saisie manuelle + épargne mensuelle − achats du plan (même calcul que le tableau de bord).
   const savings = savingsId ? active.find((a) => a.id === savingsId) : undefined;
   if (savings) {
     await write(savings, () => {
-      const manualValueEur = toEur(savings.manualValue ?? 0, savings.currency, fx);
-      const valueEur = savings.manualValueDate
-        ? estimatedSavingsBalance({
-          manualValueEur, manualDate: savings.manualValueDate,
-          monthlySavingsEur: summarizeBudget(budget, fx, strategy.monthlyInvest).savingsEur,
-          movements, plan, assets: allAssets, fx, today: date,
-        })
-        : manualValueEur;
+      const valueEur = savingsBalanceEur({ asset: savings, budget, strategy, movements, plan, assets: allAssets, fx, today: date });
       return { value: fromEur(valueEur, savings.currency, fx), valueEur };
     });
   }

@@ -3,13 +3,15 @@ import { summarizeBudget } from '@/domain/budget';
 import { monthsBetween, parisDate, parisMonth } from '@/domain/dates';
 import { variation } from '@/domain/history';
 import { averageCostPerKg, goldSilverRatio, premium, ratioAlert } from '@/domain/metals';
-import { toEur } from '@/domain/money';
+import { fromEur, toEur } from '@/domain/money';
 import { monthStatus, monthsAccrued, reservedAndFree, toInvestByAsset } from '@/domain/plan';
+import { withPositions } from '@/domain/positions';
+import { savingsBalanceEur } from '@/domain/savings';
 import { AllocationError } from '@/domain/types';
 import type {
   Asset, AssetClass, BudgetLine, Debt, FxRates, Movement, PlanLine, Snapshot, Strategy,
 } from '@/domain/types';
-import { gain } from '@/domain/valuation';
+import { gain, valueAsset } from '@/domain/valuation';
 import { zoneFor } from '@/domain/zones';
 import type {
   Dashboard, MetalPosition, MetalPurchaseView, Period, PlanLineView, ValuedAsset,
@@ -60,12 +62,28 @@ function isStale(a: Asset, nowMs: number): boolean {
   return Number.isNaN(updated) || nowMs - updated > STALE_AFTER_MS;
 }
 
-function valueAssets(assets: Asset[], fx: FxRates, nowMs: number): ValuedAsset[] {
+/**
+ * Valeurs à afficher : actif Épargne = solde estimé (`savingsEur`), actif manuel = valeur manuelle du jour
+ * (jamais la dernière valeur synchronisée, qui vaut 0 avant la première synchro), actif auto = valeur synchronisée.
+ */
+function valueAssets(
+  assets: Asset[], fx: FxRates, nowMs: number, savings: { id: string; valueEur: number } | null,
+): ValuedAsset[] {
   return assets.filter((a) => !a.archived).map((a) => {
-    const value = a.value ?? 0;
+    let value: number;
+    let valueEur: number;
+    if (savings && a.id === savings.id) {
+      valueEur = savings.valueEur;
+      value = fromEur(valueEur, a.currency, fx);
+    } else if (a.mode === 'manual') {
+      ({ value, valueEur } = valueAsset(a, undefined, fx));
+    } else {
+      value = a.value ?? 0;
+      valueEur = a.valueEur ?? toEur(value, a.currency, fx);
+    }
     const g = a.costBasis > 0 ? gain(value, a.costBasis) : null;
     return {
-      ...a, value, valueEur: a.valueEur ?? toEur(value, a.currency, fx),
+      ...a, value, valueEur,
       gainAbs: g ? g.abs : null, gainPct: g ? g.pct : null, stale: isStale(a, nowMs),
     };
   });
@@ -102,7 +120,20 @@ export function buildDashboard(i: DashboardInput): Dashboard {
   const month = parisMonth(now);
   const snapshots = [...i.snapshots].sort((a, b) => a.date.localeCompare(b.date));
   const fx = fxFrom(snapshots, today);
-  const assets = valueAssets(i.assets, fx, nowMs);
+  // Quantité et prix de revient recalculés depuis les mouvements (les rollups Notion sont tronqués à 25).
+  const positioned = withPositions(i.assets, movements);
+  const savingsSource = strategy.savingsAssetId
+    ? positioned.find((a) => a.id === strategy.savingsAssetId && !a.archived)
+    : undefined;
+  const savingsValue = savingsSource
+    ? {
+      id: savingsSource.id,
+      valueEur: savingsBalanceEur({
+        asset: savingsSource, budget: i.budget, strategy, movements, plan, assets: i.assets, fx, today,
+      }),
+    }
+    : null;
+  const assets = valueAssets(positioned, fx, nowMs, savingsValue);
   const assetById = new Map(assets.map((a) => [a.id, a]));
   const nameOf = new Map(i.assets.map((a) => [a.id, a.name]));
 

@@ -26,7 +26,9 @@ describe('buildDashboard : totaux et répartition', () => {
   it('totals.netEur = actifs non archivés − dettes, en €', () => {
     const archived: Asset = { ...fixtureSeed.assets[0], id: 'vieux', archived: true, valueEur: 99_999 };
     const d = buildDashboard(input({ assets: [...fixtureSeed.assets, archived] }));
-    const gross = fixtureSeed.assets.reduce((s, a) => s + (a.valueEur ?? 0), 0);
+    // L'Épargne compte pour son solde estimé (I3), les autres actifs pour leur valeur.
+    const gross = fixtureSeed.assets.filter((a) => a.id !== 'epargne').reduce((s, a) => s + (a.valueEur ?? 0), 0)
+      + d.plan.savings.balanceEur;
     const debts = fixtureSeed.debts.reduce((s, x) => s + (x.valueEur ?? 0), 0);
     expect(d.totals.grossEur).toBeCloseTo(gross, 6);
     expect(d.totals.debtsEur).toBeCloseTo(debts, 6);
@@ -36,7 +38,7 @@ describe('buildDashboard : totaux et répartition', () => {
   });
 
   it('byClass est trié, sans les classes à 0, et les pct somment à 1', () => {
-    const zero: Asset = { ...fixtureSeed.assets[0], id: 'nul', assetClass: 'Noms de domaine', value: 0, valueEur: 0 };
+    const zero: Asset = { ...fixtureSeed.assets[0], id: 'nul', assetClass: 'Noms de domaine', manualValue: 0, value: 0, valueEur: 0 };
     const assets = [...fixtureSeed.assets.filter((a) => a.assetClass !== 'Noms de domaine'), zero];
     const d = buildDashboard(input({ assets }));
     expect(d.byClass.every((c, i, a) => i === 0 || a[i - 1].valueEur >= c.valueEur)).toBe(true);
@@ -59,8 +61,8 @@ describe('buildDashboard : totaux et répartition', () => {
     expect(dar.valueEur).toBeCloseTo(1_200_000 / 10.85, 6);
   });
 
-  it('valueEur retombe sur la conversion de value quand la synchro ne l’a pas écrit', () => {
-    const a: Asset = { ...fixtureSeed.assets[0], valueEur: undefined, value: 1085, currency: 'MAD' };
+  it('actif auto : valueEur retombe sur la conversion de value quand la synchro ne l’a pas écrit', () => {
+    const a: Asset = { ...fixtureSeed.assets[0], mode: 'auto', valueEur: undefined, value: 1085, currency: 'MAD' };
     const d = buildDashboard(input({ assets: [a] }));
     expect(d.assets[0].valueEur).toBeCloseTo(100, 6);
   });
@@ -148,7 +150,8 @@ describe('buildDashboard : métaux', () => {
     expect(collier.premium).toBeNull();
 
     const gold = d.metals.gold!;
-    expect(gold).toMatchObject({ assetId: 'or', grams: 24.9, spotEurPerKg: 125_926 });
+    // Grammes = somme des mouvements (I12) : 6,4516 + 6,4516 + collier 0 g.
+    expect(gold).toMatchObject({ assetId: 'or', grams: 12.9032, spotEurPerKg: 125_926 });
     expect(gold.valueEur).toBeCloseTo(3_136, 6);
     expect(gold.costEur).toBe(2_402);
     expect(gold.gainPct).toBeCloseTo((3_136 - 2_402) / 2_402, 9);
@@ -242,7 +245,8 @@ describe('buildDashboard : plan du mois', () => {
     expect(d.plan.investedEur).toBe(500);
     expect(d.plan.pendingEur).toBe(1200);
     expect(d.plan.freeEur).toBeCloseTo(d.budget.freeEur, 9);
-    expect(d.plan.savings.balanceEur).toBeCloseTo(toEur(160_000, 'MAD', d.fx), 6);
+    // Solde estimé (I3) : 160 000 MAD le 2026-10-01 + épargne du 1er novembre − achats du plan (oct. 500 + nov. 500).
+    expect(d.plan.savings.balanceEur).toBeCloseTo(toEur(160_000, 'MAD', d.fx) + d.budget.savingsEur - 1_000, 6);
     expect(d.plan.savings.reservedEur).toBe(1200);
     expect(d.plan.savings.freeEur).toBeCloseTo(d.plan.savings.balanceEur - 1200, 6);
     expect(d.plan.history6.map((h) => h.month)).toEqual(['2026-06', '2026-07', '2026-08', '2026-09', '2026-10', '2026-11']);
@@ -275,3 +279,43 @@ describe('buildDashboard : plan du mois', () => {
     expect(d.metals.monthSplit).toEqual({ goldEur: 0, silverEur: 0 });
   });
 });
+
+describe('buildDashboard : fraîcheur des valeurs (I3) et positions (I12)', () => {
+  it('actif manuel jamais synchronisé : la valeur manuelle, pas 0', () => {
+    const a: Asset = { ...fixtureSeed.assets.find((x) => x.id === 'lcl')!, value: undefined, valueEur: undefined, manualValue: 5_000 };
+    const d = buildDashboard(input({ assets: [a] }));
+    expect(d.assets[0]).toMatchObject({ value: 5_000, valueEur: 5_000 });
+    expect(d.totals.grossEur).toBe(5_000);
+  });
+
+  it('valeur manuelle modifiée dans Notion après la synchro : la nouvelle valeur', () => {
+    const a: Asset = { ...fixtureSeed.assets.find((x) => x.id === 'dar-sakan')!, manualValue: 1_302_000 };
+    const d = buildDashboard(input({ assets: [a] }));
+    expect(d.assets[0].value).toBe(1_302_000);
+    expect(d.assets[0].valueEur).toBeCloseTo(1_302_000 / 10.85, 6);
+  });
+
+  it('Épargne : solde estimé recalculé, un achat déclaré après la synchro réduit aussitôt « Libre »', () => {
+    const before = buildDashboard(input());
+    const declared = { id: 'mv-new', label: 'Plan 2026-11', date: '2026-11-09', assetId: 'or', kind: 'buy' as const, quantity: 1, amount: 165, planMonth: '2026-11' };
+    const after = buildDashboard(input({ movements: [...fixtureSeed.movements, declared] }));
+    // 160 000 MAD le 2026-10-01 + épargne du 1er novembre − achats du plan depuis (oct. 500 + nov. 500)
+    expect(before.plan.savings.balanceEur).toBeCloseTo(160_000 / 10.85 + before.budget.savingsEur - 1_000, 6);
+    expect(after.plan.savings.balanceEur).toBeCloseTo(before.plan.savings.balanceEur - 165, 6);
+    expect(after.plan.savings.freeEur).toBeCloseTo(before.plan.savings.freeEur, 6); // −165 de solde, −165 de réservé
+    const ep = after.assets.find((a) => a.id === 'epargne')!;
+    expect(ep.valueEur).toBeCloseTo(after.plan.savings.balanceEur, 9);
+    expect(ep.value).toBeCloseTo(after.plan.savings.balanceEur * 10.85, 6);
+  });
+
+  it('quantité et prix de revient depuis les mouvements, au-delà de 25', () => {
+    const extra = Array.from({ length: 30 }, (_, i) => ({
+      id: `mv-x-${i}`, label: 'Achat', date: '2026-09-01', assetId: 'etf-revolut', kind: 'buy' as const, quantity: 1, amount: 150,
+    }));
+    const assets = fixtureSeed.assets.map((a) => (a.id === 'etf-revolut' ? { ...a, quantity: 25, costBasis: 3_750 } : a));
+    const d = buildDashboard(input({ assets, movements: [...fixtureSeed.movements, ...extra] }));
+    expect(d.assets.find((a) => a.id === 'etf-revolut')).toMatchObject({ quantity: 30, costBasis: 4_500 });
+    expect(d.assets.find((a) => a.id === 'lcl')).toMatchObject({ quantity: 1, costBasis: 0 }); // sans mouvement : inchangé
+  });
+});
+

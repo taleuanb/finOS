@@ -14,9 +14,9 @@ export async function validatePlan(month: string, lines: AllocationLine[]): Prom
 }
 
 export async function declarePurchase(
-  assetId: string, month: string, amount: number, date: string, fineGrams?: number,
+  assetId: string, month: string, amount: number, date: string, quantity?: number,
 ): Promise<ActionResult> {
-  const res = await declarePurchaseWith(getRepo(), assetId, month, amount, date, fineGrams);
+  const res = await declarePurchaseWith(getRepo(), assetId, month, amount, date, quantity);
   if (res.ok) revalidateTag('notion');
   return res;
 }

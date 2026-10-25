@@ -83,6 +83,25 @@ describe('validatePlanWith', () => {
     expect((await validatePlanWith(repo, '2026-11', [bad], NOW)).ok).toBe(false);
   });
 
+  it('I11 : actif auto (hors métaux) : la quantité de parts / tokens devient la quantité du mouvement', async () => {
+    const repo = new FakeRepo(fixtureSeed);
+    const before = (await repo.listMovements()).length;
+    expect(await declarePurchaseWith(repo, 'hsbc', '2026-11', 300, '2026-11-05', 8.13)).toEqual({ ok: true });
+    expect((await repo.listMovements())[before]).toMatchObject({ assetId: 'hsbc', quantity: 8.13, amount: 300 });
+    expect(await declarePurchaseWith(repo, 'crypto', '2026-11', 100, '2026-11-05')).toEqual({ ok: true });
+    expect((await repo.listMovements())[before + 1]).toMatchObject({ assetId: 'crypto', quantity: 0 }); // à compléter dans Notion
+  });
+
+  it('I11 : refuse une quantité négative ou non finie', async () => {
+    const repo = new FakeRepo(fixtureSeed);
+    const before = (await repo.listMovements()).length;
+    for (const q of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(await declarePurchaseWith(repo, 'hsbc', '2026-11', 300, '2026-11-05', q)).toEqual({ ok: false, error: 'Quantité invalide' });
+    }
+    expect(await repo.listMovements()).toHaveLength(before);
+    expect((await declarePurchaseWith(repo, 'hsbc', '2026-11', 300, '2026-11-05', 0)).ok).toBe(true);
+  });
+
   it("renvoie un message générique (sans le texte brut de l'erreur du dépôt)", async () => {
     const repo = emptyPlanRepo();
     repo.createPlanLines = async () => { throw new Error('Notion indisponible: token secret_abc'); };

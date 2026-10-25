@@ -511,6 +511,47 @@ describe('EpargneView — reliquats des mois précédents (I4)', () => {
   });
 });
 
+describe('EpargneView — quantité pour un actif coté (I11)', () => {
+  const pendingHsbc = (): Dashboard => ({
+    ...fixtureDashboard,
+    plan: {
+      ...fixtureDashboard.plan,
+      lines: fixtureDashboard.plan.lines.map((l) => (l.assetId === 'hsbc' ? { ...l, status: 'pending' as const, toInvestEur: 300 } : l)),
+    },
+  });
+
+  it('actif auto : champ facultatif « Quantité (parts / tokens) » transmis à l’action', async () => {
+    const user = userEvent.setup();
+    renderView(pendingHsbc());
+    await user.click(within(rowOf(/HSBC/)).getByRole('button', { name: /Déclarer l'achat/ }));
+    const dialog = screen.getByRole('dialog');
+    const qty = within(dialog).getByLabelText(/Quantité \(parts \/ tokens\)/);
+    expect(within(dialog).getByText('Quantité à compléter dans Notion')).toBeInTheDocument();
+    await user.type(qty, '8,13');
+    expect(within(dialog).queryByText('Quantité à compléter dans Notion')).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Confirmer' }));
+    await waitFor(() => expect(declarePurchase).toHaveBeenCalledTimes(1));
+    expect(declarePurchase.mock.calls[0][0]).toBe('hsbc');
+    expect(declarePurchase.mock.calls[0][4]).toBe(8.13);
+  });
+
+  it('actif auto : quantité vide acceptée (à compléter dans Notion)', async () => {
+    const user = userEvent.setup();
+    renderView(pendingHsbc());
+    await user.click(within(rowOf(/HSBC/)).getByRole('button', { name: /Déclarer l'achat/ }));
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Confirmer' }));
+    await waitFor(() => expect(declarePurchase).toHaveBeenCalledTimes(1));
+    expect(declarePurchase.mock.calls[0]).toHaveLength(4);
+  });
+
+  it('actif manuel : pas de champ quantité', async () => {
+    const user = userEvent.setup();
+    renderView(fixtureDashboard);
+    await user.click(within(rowOf(/Syla/)).getByRole('button', { name: /Déclarer l'achat/ }));
+    expect(within(screen.getByRole('dialog')).queryByLabelText(/Quantité/)).not.toBeInTheDocument();
+  });
+});
+
 describe('MonthPill', () => {
   it('affiche le mois en français', () => {
     render(<MonthPill month="2026-11" />);

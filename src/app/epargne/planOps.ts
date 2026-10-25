@@ -61,10 +61,12 @@ export async function validatePlanWith(
 
 /**
  * Déclare l'achat d'un actif du plan : crée un mouvement lié au mois.
- * `amount` est dans la devise de l'actif (comme Movement.amount). Pour les métaux, `fineGrams` (> 0) devient la quantité.
+ * `amount` est dans la devise de l'actif (comme Movement.amount). `quantity` : pour un métal, le poids fin
+ * (> 0, requis) ; pour un actif coté (auto) hors métaux, le nombre de parts / tokens (≥ 0, facultatif :
+ * 0 = à compléter dans Notion) ; ignorée pour un actif manuel.
  */
 export async function declarePurchaseWith(
-  repo: Repo, assetId: string, month: string, amount: number, date: string, fineGrams?: number,
+  repo: Repo, assetId: string, month: string, amount: number, date: string, quantity?: number,
 ): Promise<ActionResult> {
   if (typeof month !== 'string' || !MONTH_RE.test(month)) return fail('Mois invalide');
   if (typeof date !== 'string' || !isRealDate(date)) return fail('Date invalide');
@@ -72,15 +74,18 @@ export async function declarePurchaseWith(
   try {
     const asset = (await repo.listAssets()).find((a) => a.id === assetId);
     if (!asset) return fail('Actif introuvable');
-    let quantity = 0;
+    let movementQuantity = 0;
     if (asset.assetClass === METALS) {
-      if (typeof fineGrams !== 'number' || !Number.isFinite(fineGrams) || fineGrams <= 0) {
+      if (typeof quantity !== 'number' || !Number.isFinite(quantity) || quantity <= 0) {
         return fail('Poids fin requis pour un métal précieux');
       }
-      quantity = fineGrams;
+      movementQuantity = quantity;
+    } else if (asset.mode === 'auto' && quantity !== undefined) {
+      if (typeof quantity !== 'number' || !Number.isFinite(quantity) || quantity < 0) return fail('Quantité invalide');
+      movementQuantity = quantity;
     }
     await repo.createMovement({
-      assetId, date, kind: 'buy', label: `Plan ${month}`, planMonth: month, quantity, amount: cents(amount),
+      assetId, date, kind: 'buy', label: `Plan ${month}`, planMonth: month, quantity: movementQuantity, amount: cents(amount),
     });
     return { ok: true };
   } catch {

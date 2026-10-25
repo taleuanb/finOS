@@ -22,7 +22,8 @@ type ActionResult = { ok: true } | { ok: false; error: string };
 export interface EpargneViewProps {
   data: Dashboard;
   validatePlan: (month: string, lines: AllocationLine[]) => Promise<ActionResult>;
-  declarePurchase: (assetId: string, month: string, amount: number, date: string, fineGrams?: number) => Promise<ActionResult>;
+  /** `quantity` : poids fin (métal, requis) ou nombre de parts / tokens (actif coté, facultatif). */
+  declarePurchase: (assetId: string, month: string, amount: number, date: string, quantity?: number) => Promise<ActionResult>;
 }
 
 const METALS = 'Métaux précieux';
@@ -113,9 +114,9 @@ function ErrorText({ children }: { children: React.ReactNode }) {
 const FOCUSABLE = 'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
 function DeclareSheet({
-  line, isMetal, currency, month, onClose, declarePurchase,
+  line, isMetal, askQuantity, currency, month, onClose, declarePurchase,
 }: {
-  line: PlanLineView; isMetal: boolean; currency: Currency; month: string; onClose: () => void;
+  line: PlanLineView; isMetal: boolean; askQuantity: boolean; currency: Currency; month: string; onClose: () => void;
   declarePurchase: EpargneViewProps['declarePurchase'];
 }) {
   const uid = useId();
@@ -125,6 +126,7 @@ function DeclareSheet({
   const [amount, setAmount] = useState(() => toField(fromEur(line.toInvestEur, currency, d.fx)));
   const [date, setDate] = useState(() => parisDate(new Date()));
   const [grams, setGrams] = useState('');
+  const [units, setUnits] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
@@ -173,12 +175,20 @@ function DeclareSheet({
       if (g === null || g <= 0) return setError('Le poids fin (en grammes) est requis pour un métal.');
       fineGrams = g;
     }
+    let quantity: number | undefined;
+    if (askQuantity && units.trim() !== '') {
+      const q = parseAmount(units);
+      if (q === null) return setError('Saisis une quantité valide (ou laisse le champ vide).');
+      quantity = q;
+    }
     setError(null);
     startTransition(async () => {
       try {
         const res = isMetal
           ? await declarePurchase(line.assetId, month, value, date, fineGrams)
-          : await declarePurchase(line.assetId, month, value, date);
+          : quantity !== undefined
+            ? await declarePurchase(line.assetId, month, value, date, quantity)
+            : await declarePurchase(line.assetId, month, value, date);
         if (res.ok) onClose();
         else setError(res.error);
       } catch {
@@ -215,6 +225,21 @@ function DeclareSheet({
               value={grams} onChange={(e) => setGrams(e.target.value)}
             />
           </label>
+        ) : null}
+        {askQuantity ? (
+          <div className="flex flex-col gap-1.5">
+            <label className="flex flex-col gap-1.5 text-[13px] font-semibold text-muted" htmlFor={`${uid}-units`}>
+              Quantité (parts / tokens)
+              <input
+                id={`${uid}-units`} className={FIELD} inputMode="decimal" autoComplete="off"
+                aria-describedby={units.trim() === '' ? `${uid}-units-hint` : undefined}
+                value={units} onChange={(e) => setUnits(e.target.value)}
+              />
+            </label>
+            {units.trim() === '' ? (
+              <span id={`${uid}-units-hint`} className="text-xs text-muted">Quantité à compléter dans Notion</span>
+            ) : null}
+          </div>
         ) : null}
         <label className="flex flex-col gap-1.5 text-[13px] font-semibold text-muted" htmlFor={`${uid}-date`}>
           Date
@@ -599,6 +624,7 @@ export function EpargneView({ data, validatePlan, declarePurchase }: EpargneView
           key={declaring.assetId}
           line={declaring}
           isMetal={assetOf(declaring.assetId)?.assetClass === METALS}
+          askQuantity={assetOf(declaring.assetId)?.mode === 'auto' && assetOf(declaring.assetId)?.assetClass !== METALS}
           currency={assetOf(declaring.assetId)?.currency ?? 'EUR'}
           month={plan.month}
           onClose={closeSheet}

@@ -173,7 +173,7 @@ export function buildDashboard(i: DashboardInput): Dashboard {
   const currencyOf = new Map(i.assets.map((a) => [a.id, a.currency]));
 
   const purchases: MetalPurchaseView[] = movements
-    .filter((m) => metalOf.has(m.assetId))
+    .filter((m) => m.kind === 'buy' && metalOf.has(m.assetId))
     .sort((a, b) => a.date.localeCompare(b.date))
     .map((m) => {
       const amountEur = toEur(m.amount, currencyOf.get(m.assetId) ?? 'EUR', fx);
@@ -189,7 +189,9 @@ export function buildDashboard(i: DashboardInput): Dashboard {
     const id = metal === 'gold' ? strategy.goldAssetId : strategy.silverAssetId;
     const a = id ? assetById.get(id) : undefined;
     if (!a) return null;
-    const premiums = purchases.filter((p) => p.metal === metal && p.premium !== null).map((p) => p.premium!);
+    const premiums = purchases
+      .filter((p) => p.metal === metal && p.fineGrams > 0 && p.premium !== null)
+      .map((p) => p.premium!);
     const own = movements.filter((m) => m.assetId === a.id);
     return {
       assetId: a.id, grams: a.quantity, valueEur: a.valueEur, costEur: toEur(a.costBasis, a.currency, fx),

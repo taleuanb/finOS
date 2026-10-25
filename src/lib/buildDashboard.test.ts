@@ -155,10 +155,18 @@ describe('buildDashboard : métaux', () => {
     expect(gold.valueEur).toBeCloseTo(3_136, 6);
     expect(gold.costEur).toBe(2_402);
     expect(gold.gainPct).toBeCloseTo((3_136 - 2_402) / 2_402, 9);
-    expect(gold.avgCostPerKg).toBeCloseTo(((547 + 555 + 1300) / (6.4516 + 6.4516 + 0)) * 1000, 4);
+    // M1 : le collier (0 g fin) est exclu du coût moyen (≈ 85 405 €/kg au lieu de 186 k€/kg).
+    expect(gold.avgCostPerKg).toBeCloseTo(((547 + 555) / (6.4516 + 6.4516)) * 1000, 4);
     const goldPremiums = d.metals.purchases.filter((p) => p.metal === 'gold' && p.premium !== null).map((p) => p.premium!);
     expect(gold.avgPremium).toBeCloseTo(goldPremiums.reduce((s, p) => s + p, 0) / goldPremiums.length, 9);
     expect(d.metals.silver!.avgPremium).toBeNull(); // aucun spot d’achat d’argent connu
+  });
+
+  it('M1 : la liste des achats de métaux exclut les ventes', () => {
+    const sale = { id: 'mv-or-vente', label: 'Vente', date: '2026-01-10', assetId: 'or', kind: 'sell' as const, quantity: 1, amount: 120, spotEurPerKg: 100_000 };
+    const d = buildDashboard(input({ movements: [...fixtureSeed.movements, sale] }));
+    expect(d.metals.purchases.map((p) => p.movementId)).not.toContain('mv-or-vente');
+    expect(d.metals.purchases).toHaveLength(7);
   });
 
   it('ratio, zone et positions nuls sans actifs métaux ou sans cours', () => {

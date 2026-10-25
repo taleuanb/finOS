@@ -54,6 +54,14 @@ describe('averageCostPerKg', () => {
       { quantity: 5, amount: 900, kind: 'sell' },
     ])).toBeCloseTo(100000, 6);
   });
+  it('ignore les achats sans poids fin (quantité ≤ 0, ex. collier non pesé)', () => {
+    expect(averageCostPerKg([
+      { quantity: 6.4516, amount: 547, kind: 'buy' },
+      { quantity: 6.4516, amount: 555, kind: 'buy' },
+      { quantity: 0, amount: 1300, kind: 'buy' },
+      { quantity: -1, amount: 10, kind: 'buy' },
+    ])).toBeCloseTo(85405, 0);
+  });
   it('renvoie 0 sans achat', () => {
     expect(averageCostPerKg([])).toBe(0);
     expect(averageCostPerKg([{ quantity: 5, amount: 900, kind: 'sell' }])).toBe(0);

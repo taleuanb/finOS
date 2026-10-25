@@ -16,13 +16,13 @@ export function goldSilverRatio(goldEurPerKg: number, silverEurPerKg: number): n
 
 /**
  * Coût moyen pondéré en devise/kg : somme des achats / somme des grammes achetés × 1000.
- * Les ventes ne modifient pas le coût moyen ; 0 si aucun achat.
+ * Les ventes et les achats sans poids fin connu (quantité ≤ 0) ne comptent pas ; 0 si aucun achat.
  */
 export function averageCostPerKg(movs: { quantity: number; amount: number; kind: 'buy' | 'sell' }[]): number {
   let amount = 0;
   let grams = 0;
   for (const m of movs) {
-    if (m.kind !== 'buy') continue;
+    if (m.kind !== 'buy' || !(m.quantity > 0)) continue;
     amount += m.amount;
     grams += m.quantity;
   }

@@ -54,10 +54,14 @@ describe('pageToAsset', () => {
     expect(a.syncStatus).toBe('⚠ devise manquante');
   });
 
-  it("ne garde que la partie date d'une date avec heure", () => {
+  it("M3 : « Dernière MAJ » garde l'horodatage complet ; « Date valeur manuelle » reste une date", () => {
     const p = structuredClone(assetEtf) as unknown as NotionPage;
     (p.properties['Dernière MAJ'] as unknown as { date: { start: string } }).date.start = '2026-10-24T05:00:00.000+02:00';
-    expect(pageToAsset(p).lastUpdate).toBe('2026-10-24');
+    (p.properties['Date valeur manuelle'] as unknown as { date: { start: string } | null }).date = { start: '2026-10-01T10:00:00.000+02:00' };
+    const a = pageToAsset(p);
+    expect(a.lastUpdate).toBe('2026-10-24T05:00:00.000+02:00');
+    expect(Date.parse(a.lastUpdate!)).toBe(Date.parse('2026-10-24T03:00:00Z'));
+    expect(a.manualValueDate).toBe('2026-10-01');
   });
 });
 

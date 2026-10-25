@@ -56,6 +56,8 @@ const readDate = (p: NotionPage, name: string): string | undefined => {
   const start = p.properties[name]?.date?.start;
   return start ? start.slice(0, 10) : undefined;
 };
+/** Date avec heure éventuelle, telle que Notion la renvoie (horodatage ISO complet). */
+const readDateTime = (p: NotionPage, name: string): string | undefined => p.properties[name]?.date?.start || undefined;
 const readRelation = (p: NotionPage, name: string): string | undefined => p.properties[name]?.relation?.[0]?.id;
 const readCheckbox = (p: NotionPage, name: string): boolean => p.properties[name]?.checkbox === true;
 
@@ -103,7 +105,7 @@ export function pageToAsset(page: NotionPage): Asset {
     valueEur: readNumber(page, p.valueEur),
     fixedMonthly: readNumber(page, p.fixedMonthly),
     syncStatus: readText(page, p.syncStatus),
-    lastUpdate: readDate(page, p.lastUpdate),
+    lastUpdate: readDateTime(page, p.lastUpdate), // horodatage complet : fraîcheur à l'heure près
   };
   for (const [k, v] of Object.entries(optional)) if (v !== undefined) (asset as unknown as Record<string, unknown>)[k] = v;
   if (!currency) asset.syncStatus = '⚠ devise manquante';

@@ -1,0 +1,8 @@
+{
+  "result": "success",
+  "provider": "https://www.exchangerate-api.com",
+  "base_code": "EUR",
+  "time_last_update_unix": 1761350401,
+  "time_last_update_utc": "Sat, 25 Oct 2026 00:00:01 +0000",
+  "rates": { "EUR": 1, "MAD": 10.85, "USD": 1.08, "GBP": 0.84, "JPY": 163.2 }
+}

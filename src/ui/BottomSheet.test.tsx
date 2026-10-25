@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { BottomSheet } from './BottomSheet';
 
@@ -199,5 +199,113 @@ describe('BottomSheet', () => {
     expect(document.body.style.overflow).toBe('hidden');
     unmount();
     expect(document.body.style.overflow).toBe('');
+  });
+  describe('focus restauré avec un enfant autoFocus', () => {
+    function AutoFocusHarness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Ouvrir</button>
+          <BottomSheet open={open} title="T" onClose={() => setOpen(false)}>
+            <input aria-label="Montant" autoFocus />
+            <button type="button" onClick={() => setOpen(false)}>Fermer</button>
+          </BottomSheet>
+        </>
+      );
+    }
+
+    it("garde le focus du champ autoFocus à l'ouverture", async () => {
+      const user = userEvent.setup();
+      render(<AutoFocusHarness />);
+      await user.click(opener());
+      expect(screen.getByLabelText('Montant')).toHaveFocus();
+    });
+
+    it("rend le focus au déclencheur après Échap, fond et bouton", async () => {
+      const user = userEvent.setup();
+      render(<AutoFocusHarness />);
+
+      await user.click(opener());
+      await user.keyboard('{Escape}');
+      expect(opener()).toHaveFocus();
+
+      await user.click(opener());
+      await user.click(screen.getByRole('dialog').parentElement as HTMLElement);
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(opener()).toHaveFocus();
+
+      await user.click(opener());
+      await user.click(screen.getByRole('button', { name: 'Fermer' }));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(opener()).toHaveFocus();
+    });
+  });
+
+  describe('boucle de tabulation : éléments non focusables écartés', () => {
+    it('ignore tabindex=-1 en tête, puis input hidden, fieldset désactivé et éléments masqués en queue', async () => {
+      const user = userEvent.setup();
+      render(
+        <Harness>
+          <button type="button" tabIndex={-1}>Hors tab</button>
+          <button type="button">Premier</button>
+          <button type="button">Dernier</button>
+          <fieldset disabled><button type="button">Dans fieldset</button></fieldset>
+          <button type="button" hidden>Caché attribut</button>
+          <div style={{ display: 'none' }}><button type="button">Caché style</button></div>
+          <input type="hidden" name="h" />
+        </Harness>,
+      );
+      await user.click(opener());
+      const dialog = screen.getByRole('dialog');
+      const first = within(dialog).getByRole('button', { name: 'Premier' });
+      const last = within(dialog).getByRole('button', { name: 'Dernier' });
+      last.focus();
+      await user.tab();
+      expect(first).toHaveFocus();
+      await user.tab({ shift: true });
+      expect(last).toHaveFocus();
+    });
+  });
+
+  describe('fond cliquable', () => {
+    it("n'utilise pas un appui antérieur : un clic sans appui préalable sur le fond ne ferme pas", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await user.click(opener());
+      await user.click(screen.getByRole('dialog').parentElement as HTMLElement); // appui + clic : ferme
+      expect(screen.queryByRole('dialog')).toBeNull();
+      await user.click(opener());
+      fireEvent.click(screen.getByRole('dialog').parentElement as HTMLElement); // clic sans appui (indicateur réinitialisé)
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+
+    it("un appui dans le dialogue suivi d'un clic atterrissant sur le fond ne ferme pas", async () => {
+      const user = userEvent.setup();
+      render(<Harness />);
+      await user.click(opener());
+      const backdrop = screen.getByRole('dialog').parentElement as HTMLElement;
+      fireEvent.mouseDown(screen.getByLabelText('Nom'));
+      fireEvent.click(backdrop);
+      expect(screen.getByRole('dialog')).toBeInTheDocument();
+    });
+  });
+
+  describe('Échap', () => {
+    it('est ignoré pendant une composition de texte (IME)', () => {
+      const onClose = vi.fn();
+      render(<BottomSheet open title="T" onClose={onClose}>x</BottomSheet>);
+      fireEvent.keyDown(document, { key: 'Escape', isComposing: true });
+      expect(onClose).not.toHaveBeenCalled();
+    });
+
+    it('est ignoré si un autre gestionnaire a déjà appelé preventDefault', () => {
+      const onClose = vi.fn();
+      const swallow = (e: KeyboardEvent) => e.preventDefault();
+      document.addEventListener('keydown', swallow, true);
+      render(<BottomSheet open title="T" onClose={onClose}>x</BottomSheet>);
+      fireEvent.keyDown(document, { key: 'Escape' });
+      document.removeEventListener('keydown', swallow, true);
+      expect(onClose).not.toHaveBeenCalled();
+    });
   });
 });

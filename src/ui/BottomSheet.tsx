@@ -3,12 +3,22 @@
 import { useEffect, useId, useRef, type ReactNode } from 'react';
 
 const FOCUSABLE =
-  'a[href], button, input, select, textarea, [tabindex]:not([tabindex="-1"])';
+  'a[href], button, input:not([type="hidden"]), select, textarea, [tabindex]';
 
-/** Éléments focusables du dialogue, dans l'ordre du document. */
+/** Masqué : `hidden`, `display: none` ou `visibility: hidden` sur l'élément ou un ancêtre jusqu'au dialogue. */
+function isHidden(el: HTMLElement, dialog: HTMLElement): boolean {
+  for (let node: HTMLElement | null = el; node && node !== dialog.parentElement; node = node.parentElement) {
+    if (node.hidden) return true;
+    const style = getComputedStyle(node);
+    if (style.display === 'none' || (node === el && style.visibility === 'hidden')) return true;
+  }
+  return false;
+}
+
+/** Éléments réellement atteignables au clavier dans le dialogue, dans l'ordre du document. */
 function focusables(dialog: HTMLElement): HTMLElement[] {
   return [...dialog.querySelectorAll<HTMLElement>(FOCUSABLE)]
-    .filter((el) => !el.hasAttribute('disabled') && !el.closest('[hidden], [inert]'))
+    .filter((el) => el.getAttribute('tabindex') !== '-1' && !el.matches(':disabled') && !isHidden(el, dialog))
     .sort((a, b) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1));
 }
 
@@ -27,13 +37,24 @@ export function BottomSheet({
   const onCloseRef = useRef(onClose);
   useEffect(() => { onCloseRef.current = onClose; });
 
-  // Ouverture : mémorise l'élément déclencheur, place le focus dans la feuille, bloque le défilement du body.
+  // Élément déclencheur : capturé pendant le rendu où `open` passe à vrai, donc avant que le moindre enfant
+  // (ex. `autoFocus`) ne prenne le focus au montage.
+  const openerRef = useRef<HTMLElement | null>(null);
+  const wasOpen = useRef(false);
+  if (open && !wasOpen.current) {
+    openerRef.current = typeof document !== 'undefined' && document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+  wasOpen.current = open;
+
+  // Ouverture : place le focus dans la feuille (sauf si un enfant l'a déjà pris) et bloque le défilement du body ;
+  // fermeture : rend le focus au déclencheur s'il est encore dans le document.
   useEffect(() => {
     if (!open) return;
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const opener = openerRef.current;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    ref.current?.focus();
+    const dialog = ref.current;
+    if (dialog && !dialog.contains(document.activeElement)) dialog.focus();
     return () => {
       document.body.style.overflow = previousOverflow;
       if (opener?.isConnected) opener.focus();
@@ -45,7 +66,10 @@ export function BottomSheet({
     const onKey = (e: KeyboardEvent) => {
       const dialog = ref.current;
       if (!dialog) return;
-      if (e.key === 'Escape') { onCloseRef.current(); return; }
+      if (e.key === 'Escape') {
+        if (!e.defaultPrevented && !e.isComposing) onCloseRef.current();
+        return;
+      }
       if (e.key !== 'Tab') return;
       const items = focusables(dialog);
       if (items.length === 0) { e.preventDefault(); return; }
@@ -65,7 +89,8 @@ export function BottomSheet({
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
-  // Le clic sur le fond ferme, mais pas une sélection commencée dans le dialogue et terminée sur le fond.
+  // Le clic sur le fond ferme, mais seulement si l'appui a aussi eu lieu sur le fond (pas une sélection de texte
+  // commencée dans le dialogue et terminée sur le fond). L'indicateur est réinitialisé à chaque clic.
   const pressedOnBackdrop = useRef(false);
 
   if (!open) return null;
@@ -74,7 +99,11 @@ export function BottomSheet({
     <div
       className="fixed inset-0 z-50 flex items-end justify-center bg-black/40"
       onMouseDown={(e) => { pressedOnBackdrop.current = e.target === e.currentTarget; }}
-      onClick={(e) => { if (e.target === e.currentTarget && pressedOnBackdrop.current) onClose(); }}
+      onClick={(e) => {
+        const pressed = pressedOnBackdrop.current;
+        pressedOnBackdrop.current = false;
+        if (e.target === e.currentTarget && pressed) onClose();
+      }}
     >
       <div
         ref={ref}

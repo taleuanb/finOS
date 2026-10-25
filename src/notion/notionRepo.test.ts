@@ -205,6 +205,30 @@ describe('écriture : actifs, crédits, Stratégie', () => {
     expect(queries).toHaveLength(1);
     expect(queries[0].filter).toEqual({ property: 'Clé', title: { equals: 'x' } });
   });
+  it("n'appelle pas pages.update quand il n'y a rien à écrire", async () => {
+    const { client, updates } = fakeClient({ 'ds-strategy': [strategyRows] });
+    const repo = createNotionRepo(client, ids);
+    await repo.updateAsset('a1', {});
+    await repo.updateAsset('a1', { manualValue: undefined });
+    await repo.updateAsset('a1', { name: null });
+    await repo.updateDebt('d1', {});
+    await repo.setStrategyEntry({ key: 'cible:Crypto' });
+    expect(updates).toHaveLength(0);
+  });
+  it('rogne la clé Stratégie une seule fois (requête, comparaison et titre créé)', async () => {
+    const hit = fakeClient({ 'ds-strategy': [strategyRows] });
+    await createNotionRepo(hit.client, ids).setStrategyEntry({ key: '  actif:or ', assetId: null });
+    expect(hit.queries[0].filter).toEqual({ property: 'Clé', title: { equals: 'actif:or' } });
+    expect(hit.updates).toEqual([{ page_id: 's0000000-0000-4000-8000-000000000003', properties: { 'Actif': { relation: [] } } }]);
+    const miss = fakeClient({ 'ds-strategy': [[]] });
+    await createNotionRepo(miss.client, ids).setStrategyEntry({ key: ' nouvelle ', value: 1 });
+    expect(miss.queries[0].filter).toEqual({ property: 'Clé', title: { equals: 'nouvelle' } });
+    expect(miss.creates[0].properties['Clé']).toEqual({ title: [{ text: { content: 'nouvelle' } }] });
+    const del = fakeClient({ 'ds-strategy': [strategyRows] });
+    await createNotionRepo(del.client, ids).deleteStrategyEntry(' actif:or ');
+    expect(del.queries[0].filter).toEqual({ property: 'Clé', title: { equals: 'actif:or' } });
+    expect(del.updates).toEqual([{ page_id: 's0000000-0000-4000-8000-000000000003', in_trash: true }]);
+  });
   it('toutes les écritures passent par limit', async () => {
     const { client } = fakeClient({ 'ds-strategy': [[]] });
     const spy = vi.fn((fn: () => Promise<unknown>) => fn());

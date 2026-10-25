@@ -69,6 +69,7 @@ export function createNotionRepo(client: NotionClientLike, ids: Record<keyof typ
     return res.id;
   };
   const update = async (pageId: string, properties: NotionProps): Promise<void> => {
+    if (Object.keys(properties).length === 0) return; // rien à écrire : pas d'appel Notion
     await limit(() => client.pages.update({ page_id: pageId, properties }));
   };
 
@@ -78,7 +79,7 @@ export function createNotionRepo(client: NotionClientLike, ids: Record<keyof typ
   /** Pages Stratégie dont la clé est exactement `key` (filtre Notion + garde-fou côté client). */
   const strategyPages = async (key: string): Promise<NotionPage[]> =>
     (await queryAll(ids.strategy, { filter: { property: P.strategy.key, title: { equals: key } } }))
-      .filter((page) => pageToStrategyRow(page).key === key.trim());
+      .filter((page) => pageToStrategyRow(page).key === key);
 
   return {
     async listAssets(): Promise<Asset[]> {
@@ -155,13 +156,14 @@ export function createNotionRepo(client: NotionClientLike, ids: Record<keyof typ
     async deleteDebt(id) {
       await trash(id);
     },
-    async setStrategyEntry(e) {
+    async setStrategyEntry(entry) {
+      const e = { ...entry, key: entry.key.trim() };
       const [existing] = await strategyPages(e.key);
       if (existing) await update(existing.id, strategyEntryToProperties(e, false));
       else await create(ids.strategy, strategyEntryToProperties(e, true));
     },
     async deleteStrategyEntry(key) {
-      for (const page of await strategyPages(key)) await trash(page.id);
+      for (const page of await strategyPages(key.trim())) await trash(page.id);
     },
   };
 }

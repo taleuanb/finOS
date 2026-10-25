@@ -78,15 +78,20 @@ export async function retrieveSchema(client: NotionClientLike, dsId: string, lim
 
 /** Durée de vie, par instance, du schéma mémorisé (un identifiant de colonne recréée y est repris). */
 const SCHEMA_TTL_MS = 3_600_000;
+/** Délai minimal entre deux rechargements forcés du schéma d'une base (colonne absente, filtre rejeté). */
+const RELOAD_COOLDOWN_MS = 300_000;
 
 /** Erreur de validation Notion (400) : p. ex. un identifiant de propriété inconnu dans `filter_properties`. */
 const isValidationError = (e: unknown): boolean =>
   typeof e === 'object' && e !== null && ((e as { status?: unknown }).status === 400 || (e as { code?: unknown }).code === 'validation_error');
 
 /**
- * `opts.schema` : chargeur du schéma d'une base (par défaut, un `retrieve` Notion). Son résultat est mémorisé par
- * instance pendant 1 h (jamais un échec). Une colonne demandée mais absente du schéma mémorisé le fait recharger une fois ;
- * si elle manque toujours, ou si le schéma est illisible, la base est lue sans filtre : l'optimisation ne fait jamais échouer une lecture.
+ * `opts.schema` : chargeur du schéma d'une base (par défaut, un `retrieve` Notion), mémorisé par instance pendant 1 h
+ * (jamais un échec). Une colonne demandée mais absente (base sans cette colonne optionnelle, ou colonne créée depuis)
+ * recharge le schéma au plus une fois toutes les 5 min par base, les lectures simultanées partageant ce rechargement ;
+ * les colonnes restées absentes sont simplement omises du filtre (les mappers lisent `undefined` comme une valeur par défaut).
+ * Un schéma illisible, ou un filtre rejeté par Notion (identifiant périmé), donne une lecture non filtrée : l'optimisation
+ * ne fait jamais échouer une lecture.
  */
 export function createNotionRepo(
   client: NotionClientLike, ids: Record<keyof typeof DB, string>, limit: Limit = identity,
@@ -95,6 +100,10 @@ export function createNotionRepo(
   const loader = opts.schema ?? ((dsId: string) => retrieveSchema(client, dsId, limit));
   const canReadSchema = opts.schema !== undefined || client.dataSources.retrieve !== undefined;
   const memo = new Map<string, { at: number; schema: Promise<DataSourceSchema> }>();
+  /** Dernier rechargement forcé par base (sa promesse est partagée par les lectures simultanées). */
+  const reloads = new Map<string, { at: number; schema: Promise<DataSourceSchema> }>();
+  /** Bases lues sans filtre jusqu'à cette date (après un filtre rejeté). */
+  const unfilteredUntil = new Map<string, number>();
 
   /** Schéma mémorisé de la base ; `fresh` ignore le mémo et le remplace. */
   function schemaOf(dsId: string, fresh = false): Promise<DataSourceSchema> {
@@ -106,17 +115,21 @@ export function createNotionRepo(
     return schema;
   }
 
-  /** Identifiants des colonnes demandées (+ le titre) ; `undefined` = pas de filtre (schéma illisible ou colonne absente). */
+  /** Identifiants des colonnes demandées existantes (+ le titre) ; `undefined` = pas de filtre. */
   async function filterPropertyIds(dsId: string, names: readonly string[]): Promise<string[] | undefined> {
-    if (!canReadSchema) return undefined;
+    if (!canReadSchema || Date.now() < (unfilteredUntil.get(dsId) ?? 0)) return undefined;
     try {
       let schema = await schemaOf(dsId);
       if (names.some((n) => !(n in schema))) {
-        schema = await schemaOf(dsId, true); // schéma périmé ? un seul rechargement
-        const missing = names.filter((n) => !(n in schema));
-        if (missing.length > 0) {
-          console.error(`Notion : colonnes absentes (${missing.join(', ')}), lecture non filtrée`);
-          return undefined;
+        const last = reloads.get(dsId);
+        if (last && Date.now() - last.at < RELOAD_COOLDOWN_MS) {
+          schema = await last.schema; // rechargement récent ou en cours : on le réutilise
+        } else {
+          const reload = schemaOf(dsId, true);
+          reloads.set(dsId, { at: Date.now(), schema: reload });
+          schema = await reload;
+          const missing = names.filter((n) => !(n in schema));
+          if (missing.length > 0) console.error(`Notion : colonnes absentes de la base (${missing.join(', ')}), omises de la lecture`);
         }
       }
       const found = new Set<string>();
@@ -167,6 +180,7 @@ export function createNotionRepo(
       // Identifiant de propriété périmé (colonne recréée) : on oublie le schéma et on relit sans filtre, une fois.
       console.error('Notion : filter_properties rejeté, lecture non filtrée', e instanceof Error ? e.message : e);
       memo.delete(dsId);
+      unfilteredUntil.set(dsId, Date.now() + RELOAD_COOLDOWN_MS); // pas de nouvel essai filtré avant la fin de la fenêtre
       return run(undefined);
     }
   }

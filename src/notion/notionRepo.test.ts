@@ -440,39 +440,83 @@ describe('schéma : mémo par instance, colonne absente, identifiant périmé', 
     expect(loader).toHaveBeenCalledTimes(2);
   });
 
-  it("colonne demandée absente du schéma mémorisé : un seul rechargement ; si elle est apparue, la lecture reste filtrée et l'inclut", async () => {
-    const full = schemaOf(assetEtf);
-    const { 'Versement fixe mensuel': _gone, ...without } = full;
-    const schema = { 'ds-assets': without };
-    const { client, queries, retrieve } = schemaClient({ 'ds-assets': [assetEtf] }, schema);
+  const FIVE_MIN = 5 * 60_000;
+  const { 'Versement fixe mensuel': _fixed, ...assetWithoutFixed } = assetEtf.properties;
+  const etfNoFixed = { ...assetEtf, properties: assetWithoutFixed };
+  const fullSchema = () => schemaOf(assetEtf);
+  const schemaNoFixed = () => schemaOf(etfNoFixed as never);
+
+  it("colonne optionnelle absente de la base : un rechargement forcé, puis lectures filtrées sur les colonnes existantes (jamais de retrieve à chaque lecture)", async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client, queries, retrieve } = schemaClient({ 'ds-assets': [etfNoFixed] }, { 'ds-assets': schemaNoFixed() });
     const repo = createNotionRepo(client, ids);
-    await repo.listAssets(); // absente : rechargement, toujours absente -> lecture non filtrée
-    expect(retrieve).toHaveBeenCalledTimes(2);
-    expect(queries[0].filter_properties).toBeUndefined();
-    schema['ds-assets'] = full; // la colonne est (re)créée
-    const [a] = await repo.listAssets();
-    expect(retrieve).toHaveBeenCalledTimes(3);
-    expect(queries[1].filter_properties).toContain('id:Versement fixe mensuel');
-    expect(a.fixedMonthly).toBe(pageToAsset(assetEtf).fixedMonthly);
-    await repo.listAssets(); // schéma complet mémorisé : plus de rechargement
-    expect(retrieve).toHaveBeenCalledTimes(3);
+    const [first] = await repo.listAssets();
+    await repo.listAssets();
+    expect(retrieve).toHaveBeenCalledTimes(2); // lecture initiale + un rechargement forcé
+    for (const q of queries) {
+      expect(q.filter_properties).toBeDefined();
+      expect(q.filter_properties).toContain('id:Nom');
+      expect(q.filter_properties).not.toContain('id:Versement fixe mensuel');
+    }
+    expect(consoleError).toHaveBeenCalledTimes(1); // journalisé une fois par base et par fenêtre
+    // une colonne absente donne la même valeur par défaut qu'une lecture non filtrée de la même base
+    const unfiltered = fakeClient({ 'ds-assets': [[etfNoFixed]] });
+    expect(first).toEqual({ ...(await createNotionRepo(unfiltered.client, ids).listAssets())[0], quantity: 0, costBasis: 0 }); // hors colonnes calculées (non lues)
+    expect(first.fixedMonthly).toBeUndefined();
   });
 
-  it("une colonne recréée avec un nouvel identifiant est reprise au rechargement", async () => {
-    const full = schemaOf(assetEtf);
+  it("des lectures en parallèle partagent un seul rechargement forcé", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client, retrieve } = schemaClient({ 'ds-assets': [etfNoFixed] }, { 'ds-assets': schemaNoFixed() });
+    const repo = createNotionRepo(client, ids);
+    await Promise.all([repo.listAssets(), repo.listAssets(), repo.listAssets(), repo.listAssets()]);
+    expect(retrieve).toHaveBeenCalledTimes(2);
+  });
+
+  it("après 5 min, une colonne toujours absente déclenche un nouveau rechargement ; si elle est apparue, elle est demandée", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const schema = { 'ds-assets': schemaNoFixed() };
+    const { client, queries, retrieve } = schemaClient({ 'ds-assets': [assetEtf] }, schema);
+    const repo = createNotionRepo(client, ids);
+    await repo.listAssets();
+    expect(retrieve).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(FIVE_MIN - 1000);
+    await repo.listAssets();
+    expect(retrieve).toHaveBeenCalledTimes(2); // dans la fenêtre : pas de rechargement
+    vi.advanceTimersByTime(2000);
+    await repo.listAssets(); // fenêtre écoulée, colonne toujours absente
+    expect(retrieve).toHaveBeenCalledTimes(3);
+    expect(queries.at(-1)?.filter_properties).not.toContain('id:Versement fixe mensuel');
+    schema['ds-assets'] = fullSchema(); // la colonne est créée
+    vi.advanceTimersByTime(FIVE_MIN + 1000);
+    const [a] = await repo.listAssets();
+    expect(retrieve).toHaveBeenCalledTimes(4);
+    expect(queries.at(-1)?.filter_properties).toContain('id:Versement fixe mensuel');
+    expect(a.fixedMonthly).toBe(pageToAsset(assetEtf).fixedMonthly);
+    await repo.listAssets(); // schéma complet : plus de rechargement
+    expect(retrieve).toHaveBeenCalledTimes(4);
+  });
+
+  it("une colonne recréée avec un nouvel identifiant est reprise au rechargement (après la fenêtre)", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const full = fullSchema();
     const { 'Statut sync': _old, ...without } = full;
     const schema = { 'ds-assets': without };
     const { client, queries } = schemaClient({ 'ds-assets': [assetEtf] }, schema);
     const repo = createNotionRepo(client, ids);
     await repo.listAssets();
     schema['ds-assets'] = { ...without, 'Statut sync': { id: 'id:Statut sync:v2', type: 'rich_text' } };
+    vi.advanceTimersByTime(FIVE_MIN + 1000);
     await repo.listAssets();
     expect(queries.at(-1)?.filter_properties).toContain('id:Statut sync:v2');
   });
 
-  it("une requête filtrée rejetée (identifiant périmé, 400) est rejouée une fois sans filtre et invalide le mémo", async () => {
+  it("une requête filtrée rejetée (identifiant périmé, 400) est rejouée une fois sans filtre ; la base est lue sans filtre pendant 5 min puis de nouveau filtrée", async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    const full = schemaOf(assetEtf);
+    const full = fullSchema();
     const schema = { 'ds-assets': full };
     const { client, queries, retrieve } = schemaClient({ 'ds-assets': [assetEtf] }, schema);
     const repo = createNotionRepo(client, ids);
@@ -481,7 +525,11 @@ describe('schéma : mémo par instance, colonne absente, identifiant périmé', 
     const [a] = await repo.listAssets();
     expect(a.name).toBe(pageToAsset(assetEtf).name); // la lecture n'échoue pas
     expect(queries.map((q) => q.filter_properties !== undefined)).toEqual([true, true, false]);
-    await repo.listAssets(); // mémo invalidé : nouveau schéma, requête filtrée valide
+    await repo.listAssets(); // dans la fenêtre : lecture non filtrée, sans retrieve ni double requête
+    expect(queries.map((q) => q.filter_properties !== undefined)).toEqual([true, true, false, false]);
+    expect(retrieve).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(FIVE_MIN + 1000);
+    await repo.listAssets(); // fenêtre écoulée : nouveau schéma, requête filtrée valide
     expect(retrieve).toHaveBeenCalledTimes(2);
     expect(queries.at(-1)?.filter_properties).toContain('id:Statut sync:v2');
   });

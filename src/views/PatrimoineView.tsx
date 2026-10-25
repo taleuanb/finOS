@@ -69,7 +69,8 @@ function assetRow(a: ValuedAsset): RowModel {
   return {
     id: a.id, name: a.name, sub: [a.subtype, a.institution].filter(Boolean).join(' · '),
     eur: a.valueEur, original: a.currency === 'EUR' ? null : { amount: a.value, currency: a.currency },
-    gainPct: a.gainPct, warning: a.stale ? (a.syncStatus ?? 'à vérifier') : null,
+    // Le statut écrit par la synchro commence déjà par « ⚠ » : on le retire, l'icône est ajoutée à l'affichage.
+    gainPct: a.gainPct, warning: a.stale ? (a.syncStatus?.replace(/^\s*⚠\s*/, '') || 'à vérifier') : null,
     ini: initials(a.name), bg: style.bg, fg: style.fg,
   };
 }

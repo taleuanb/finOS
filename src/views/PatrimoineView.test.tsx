@@ -171,6 +171,15 @@ describe('PatrimoineView', () => {
     expect(screen.queryByText('Dar Sakan')).toBeNull();
   });
 
+  it('M4 : un statut de synchro déjà préfixé par ⚠ n’est pas doublé', () => {
+    const assets = fixtureDashboard.assets.map((a) =>
+      a.id === 'hsbc' ? { ...a, stale: true, syncStatus: '⚠ délai dépassé (8 s) : Yahoo' } : a,
+    );
+    setup({ ...fixtureDashboard, assets });
+    expect(within(rowOf('HSBC Islamic Global Equity')).getByText('⚠ délai dépassé (8 s) : Yahoo')).toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/⚠\s*⚠/);
+  });
+
   it("affiche le statut d'un actif périmé", () => {
     const assets = fixtureDashboard.assets.map((a) =>
       a.id === 'hsbc' ? { ...a, stale: true, syncStatus: 'prix indisponible' } : a,

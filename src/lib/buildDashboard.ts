@@ -12,7 +12,7 @@ import type {
   Asset, AssetClass, BudgetLine, Debt, FxRates, Movement, PlanLine, Snapshot, Strategy,
 } from '@/domain/types';
 import { gain, valueAsset } from '@/domain/valuation';
-import { zoneFor } from '@/domain/zones';
+import { gridIssue, zoneFor } from '@/domain/zones';
 import type {
   Dashboard, MetalPosition, MetalPurchaseView, Period, PlanLineView, ValuedAsset,
 } from './dashboard';
@@ -208,6 +208,13 @@ export function buildDashboard(i: DashboardInput): Dashboard {
     ? goldSilverRatio(gold.spotEurPerKg, silver.spotEurPerKg)
     : null;
   const zone = ratio !== null && strategy.metalGrid.length > 0 ? zoneFor(ratio, strategy.metalGrid) : null;
+  const gridProblems = [
+    ...(strategy.gridWarnings ?? []).map((label) => `zone illisible : ${label}`),
+    ...[gridIssue(strategy.metalGrid)].filter((x): x is string => x !== null),
+  ];
+  const gridWarning = gridProblems.length > 0
+    ? `⚠ Grille or/argent incomplète dans la Stratégie (${gridProblems.join(' ; ')})`
+    : null;
 
   // --- Budget ---
   const budgetSummary = summarizeBudget(i.budget, fx, strategy.monthlyInvest);
@@ -267,6 +274,7 @@ export function buildDashboard(i: DashboardInput): Dashboard {
       gold, silver, ratio, zone, alert: ratioAlert(snapshots, strategy.metalGrid),
       ratioHistory: ratioHistoryFrom(i.series), purchases,
       monthSplit: { goldEur: splitOf(strategy.goldAssetId), silverEur: splitOf(strategy.silverAssetId) },
+      gridWarning,
     },
     budget,
     plan: {

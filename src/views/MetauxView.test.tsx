@@ -28,6 +28,16 @@ describe('MetauxView', () => {
     expect(screen.getByRole('img', { name: 'Ratio 64,5, zone Neutre' })).toBeTruthy();
   });
 
+  it('I10 : avertit quand la grille or/argent de la Stratégie est incomplète', () => {
+    view(withMetals({ gridWarning: '⚠ Grille or/argent incomplète dans la Stratégie (zone illisible : Bizarre)' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('⚠ Grille or/argent incomplète dans la Stratégie');
+  });
+
+  it('sans avertissement de grille : pas d’alerte', () => {
+    view(fixtureDashboard);
+    expect(screen.queryByText(/Grille or\/argent incomplète/)).toBeNull();
+  });
+
   it('dessine la grille proportionnelle aux zones avec un repère à la position du ratio', () => {
     view(fixtureDashboard);
     const bar = screen.getByRole('img', { name: 'Ratio 64,5, zone Neutre' });

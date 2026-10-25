@@ -78,6 +78,7 @@ const metals: Dashboard['metals'] = {
   ratioHistory: snapshots.filter((s) => s.goldSilverRatio !== null).map((s) => ({ date: s.date, ratio: s.goldSilverRatio! })),
   purchases,
   monthSplit: { goldEur: 165, silverEur: 135 },
+  gridWarning: null,
 };
 
 // --- Budget (mois type) ---

@@ -360,3 +360,21 @@ describe('buildDashboard : reliquats des mois précédents (I4)', () => {
     expect(d.plan.pendingEur).toBe(d.plan.savings.reservedEur);
   });
 });
+
+describe('buildDashboard : grille or/argent (I10)', () => {
+  it('grille par défaut : aucun avertissement', () => {
+    expect(buildDashboard(input()).metals.gridWarning).toBeNull();
+  });
+  it('zone illisible dans la Stratégie : avertissement', () => {
+    const strategy = { ...fixtureSeed.strategy, gridWarnings: ['Bizarre'] };
+    expect(buildDashboard(input({ strategy })).metals.gridWarning).toMatch(/^⚠ Grille or\/argent incomplète dans la Stratégie/);
+  });
+  it('grille à trous : avertissement et zone neutre pour un ratio hors grille', () => {
+    const metalGrid = fixtureSeed.strategy.metalGrid.filter((z) => z.label !== 'Neutre'); // trou 50–65
+    const d = buildDashboard(input({ strategy: { ...fixtureSeed.strategy, metalGrid } }));
+    expect(d.metals.gridWarning).toMatch(/Grille or\/argent incomplète/);
+    expect(d.metals.ratio).toBeCloseTo(64.51, 2);
+    expect(d.metals.zone!.label).not.toBe('Argent bon marché');
+  });
+});
+

@@ -256,6 +256,12 @@ export function MetauxView({ data }: { data: Dashboard }) {
         </p>
       ) : null}
 
+      {metals.gridWarning ? (
+        <p role="alert" className="rounded-2xl bg-loss-bg px-4 py-3 text-[13px] font-semibold text-loss">
+          {metals.gridWarning}
+        </p>
+      ) : null}
+
       {metals.alert ? (
         <p role="alert" className="rounded-2xl border border-[#F6D3B5] bg-[#FFF6EE] px-4 py-3 text-[13px] font-semibold text-[#9A4A0E]">
           Réajustement conseillé : ratio hors zone neutre depuis 14 jours

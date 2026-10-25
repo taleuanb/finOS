@@ -46,6 +46,7 @@ export interface Strategy {
   mainAssetByClass: Partial<Record<AssetClass, string>>;   // assetId
   goldAssetId?: string; silverAssetId?: string; savingsAssetId?: string;
   monthlyInvest: number; metalGrid: MetalZone[]; displayCurrency: Currency;
+  gridWarnings?: string[];                                  // libellés des lignes zone: illisibles
 }
 
 export interface PlanLine { id?: string; month: string; assetId: string; amount: number; origin: 'fixe' | 'cible' | 'signal' }

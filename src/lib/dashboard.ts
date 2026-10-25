@@ -32,6 +32,7 @@ export interface Dashboard {
     gold: MetalPosition | null; silver: MetalPosition | null; ratio: number | null; zone: MetalZone | null;
     alert: boolean; ratioHistory: { date: string; ratio: number }[]; purchases: MetalPurchaseView[];
     monthSplit: { goldEur: number; silverEur: number };
+    gridWarning: string | null;                     // « ⚠ Grille or/argent incomplète dans la Stratégie … »
   };
   budget: BudgetSummary & { lines: BudgetLine[] };
   plan: {

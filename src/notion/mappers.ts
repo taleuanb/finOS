@@ -258,7 +258,8 @@ export function budgetLineToProperties(l: Omit<BudgetLine, 'id'>): NotionProps {
 export interface StrategyRow { key: string; value?: number; text?: string; assetId?: string }
 
 const round = (n: number) => Math.round(n * 1e6) / 1e6;
-const ZONE_TEXT = /^\s*(\d+(?:[.,]\d+)?)\s*-\s*(\d+(?:[.,]\d+)?)?\s*$/;
+/** « min-max », « min–max » ou « min—max » ; « 80- » pour une zone ouverte. */
+const ZONE_TEXT = /^\s*(\d+(?:[.,]\d+)?)\s*[-–—]\s*(\d+(?:[.,]\d+)?)?\s*$/;
 
 function parseZone(label: string, share: number | undefined, range: string | undefined): MetalZone | undefined {
   const m = range ? ZONE_TEXT.exec(range) : null;
@@ -272,6 +273,7 @@ export function rowsToStrategy(pages: NotionPage[]): Strategy {
   const p = P.strategy;
   const s: Strategy = { targets: {}, mainAssetByClass: {}, monthlyInvest: 0, metalGrid: [], displayCurrency: 'EUR' };
   const zones: MetalZone[] = [];
+  const unreadable: string[] = [];
 
   for (const page of pages) {
     const key = readTitle(page, p.key).trim();
@@ -286,6 +288,7 @@ export function rowsToStrategy(pages: NotionPage[]): Strategy {
     } else if (key.startsWith(STRATEGY_KEY.zonePrefix)) {
       const zone = parseZone(key.slice(STRATEGY_KEY.zonePrefix.length).trim(), value, readText(page, p.text));
       if (zone) zones.push(zone);
+      else unreadable.push(key.slice(STRATEGY_KEY.zonePrefix.length).trim());
     } else if (key === STRATEGY_KEY.gold) {
       if (asset) s.goldAssetId = asset;
     } else if (key === STRATEGY_KEY.silver) {
@@ -303,6 +306,7 @@ export function rowsToStrategy(pages: NotionPage[]): Strategy {
 
   // Sans aucune zone saisie : grille par défaut de la spec §4.5.
   s.metalGrid = zones.length > 0 ? zones.sort((a, b) => a.min - b.min) : DEFAULT_METAL_GRID.map((z) => ({ ...z }));
+  if (unreadable.length > 0) s.gridWarnings = unreadable;
   return s;
 }
 

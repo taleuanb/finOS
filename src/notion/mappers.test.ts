@@ -136,6 +136,26 @@ describe('rowsToStrategy', () => {
     expect(Object.keys(r.targets).sort()).toEqual(['Crypto', 'Fonds & ETF']);
     expect(r.metalGrid).toHaveLength(3);
   });
+  it('I10 : bornes de zone avec tiret, demi-cadratin ou cadratin ; zone illisible signalée', () => {
+    const zone = (id: string, label: string, share: number | null, text: string) => pg({
+      id, properties: {
+        'Clé': { type: 'title', title: [{ plain_text: `zone:${label}` }] },
+        'Valeur': { type: 'number', number: share },
+        'Texte': { type: 'rich_text', rich_text: [{ plain_text: text }] },
+      },
+    });
+    const r = rowsToStrategy([
+      zone('z1', 'Or', 80, '0–50'), zone('z2', 'Neutre', 55, '50 — 65'), zone('z3', 'Argent', 20, '65-'),
+      zone('z4', 'Bizarre', 5, 'abc'), zone('z5', 'Sans part', null, '10-20'),
+    ]);
+    expect(r.metalGrid).toEqual([
+      { label: 'Or', min: 0, max: 50, goldShare: 0.8 },
+      { label: 'Neutre', min: 50, max: 65, goldShare: 0.55 },
+      { label: 'Argent', min: 65, max: Infinity, goldShare: 0.2 },
+    ]);
+    expect(r.gridWarnings).toEqual(['Bizarre', 'Sans part']);
+    expect(rowsToStrategy(strategyRows.map(pg)).gridWarnings).toBeUndefined();
+  });
   it('sans ligne : valeurs par défaut', () => {
     const r = rowsToStrategy([]);
     expect(r).toMatchObject({ targets: {}, mainAssetByClass: {}, monthlyInvest: 0, displayCurrency: 'EUR' });

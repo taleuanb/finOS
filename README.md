@@ -36,7 +36,7 @@ npm run dev                  # avec Notion : NOTION_TOKEN et NOTION_DB_* requis
    Le script crée la page « Patrimoine » sous WEALTH, avec les bases Actifs, Mouvements, Dettes, Budget, Stratégie, Plan mensuel et Historique. Chaque identifiant `NOTION_DB_*` est affiché dès que sa base est créée ; en cas d'échec, le script rappelle les bases déjà créées (à supprimer avec la page « Patrimoine » avant de relancer).
 4. Coller dans `.env.local` les lignes `NOTION_DB_*` affichées par le script. Ce sont des identifiants de **sources de données** (data sources), pas d'anciennes bases.
 5. **Restreindre l'accès** : partager la seule page « Patrimoine » avec l'intégration (menu `…` → `Connexions`), puis retirer l'intégration de la page WEALTH. L'intégration n'a ainsi accès qu'à « Patrimoine » et à ses bases.
-6. **Compléter la base Stratégie** (une ligne par réglage, colonne `Clé`). Le script crée les lignes avec leurs valeurs par défaut ; il reste à choisir les actifs dans la colonne relation `Actif` :
+6. **Compléter la base Stratégie** (une ligne par réglage, colonne `Clé`). Le script crée les lignes avec leurs valeurs par défaut ; il reste à choisir les actifs. Tout se règle aussi **dans l'app, page Stratégie** (lien « Régler la stratégie » de l'écran Épargne : investissement mensuel, cibles et actif principal par classe, actifs or/argent/épargne, grille or/argent) ; les écritures sont validées côté serveur. Dans Notion, les actifs se choisissent dans la colonne relation `Actif` :
 
    | Clé | Colonne utilisée | Rôle |
    | --- | --- | --- |
@@ -80,7 +80,6 @@ npx tsx --env-file=.env.local scripts/import-metals.ts autre.csv  # ou un autre 
    | `SESSION_SECRET` | Secret de signature du cookie de session (32 caractères minimum) |
    | `CRON_SECRET` | Secret accepté par `/api/sync` pour le cron |
    | `NEXT_PUBLIC_NOTION_ASSETS_URL` (facultatif) | Lien vers la base Actifs dans Notion |
-   | `NEXT_PUBLIC_NOTION_STRATEGY_URL` (facultatif) | Lien vers la base Stratégie dans Notion |
 
 3. Déployer. Le fichier `vercel.json` programme un cron qui appelle `/api/sync` **tous les jours à 05:00 UTC**. Quand `CRON_SECRET` est défini, Vercel l'envoie automatiquement dans l'en-tête `Authorization: Bearer <CRON_SECRET>`, que le middleware accepte pour cette seule route.
 4. Sur le plan **Hobby**, un cron ne peut s'exécuter qu'**une fois par jour**.

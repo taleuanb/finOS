@@ -104,6 +104,60 @@ describe('PatrimoineView', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('rend le focus à la puce après Échap, Appliquer, Réinitialiser et clic sur le fond', async () => {
+    const user = userEvent.setup();
+    setup();
+    const chip = () => screen.getByRole('button', { name: /^(\+ )?Type/ });
+
+    await user.click(chip());
+    expect(screen.getByRole('dialog')).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(chip()).toHaveFocus();
+
+    await user.click(chip());
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Appliquer' }));
+    expect(chip()).toHaveFocus();
+
+    await user.click(chip());
+    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Réinitialiser' }));
+    expect(chip()).toHaveFocus();
+
+    await user.click(chip());
+    await user.click(screen.getByRole('dialog').parentElement as HTMLElement);
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(chip()).toHaveFocus();
+  });
+
+  it('garde la tabulation dans la feuille (Tab et Maj+Tab bouclent)', async () => {
+    const user = userEvent.setup();
+    setup();
+    await user.click(screen.getByRole('button', { name: '+ Devise' }));
+    const dialog = screen.getByRole('dialog');
+    const apply = within(dialog).getByRole('button', { name: 'Appliquer' });
+    const first = within(dialog).getAllByRole('checkbox')[0];
+    apply.focus();
+    await user.tab();
+    expect(first).toHaveFocus();
+    await user.tab({ shift: true });
+    expect(apply).toHaveFocus();
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+  });
+
+  it('ne vole pas le focus de la case cochée quand le parent est re-rendu', async () => {
+    const user = userEvent.setup();
+    const { rerender } = setup();
+    await user.click(screen.getByRole('button', { name: '+ Devise' }));
+    const box = within(screen.getByRole('dialog')).getByRole('checkbox', { name: 'MAD' });
+    await user.click(box);
+    expect(box).toHaveFocus();
+    rerender(
+      <DisplayProvider fx={fixtureDashboard.fx}>
+        <PatrimoineView data={{ ...fixtureDashboard }} />
+      </DisplayProvider>,
+    );
+    expect(box).toHaveFocus();
+  });
+
   it("l'onglet Passifs affiche le Crédit Dar Sakan sans les filtres", async () => {
     const user = userEvent.setup();
     setup();
@@ -128,6 +182,11 @@ describe('PatrimoineView', () => {
 
   it('affiche le bandeau « Données du … » si le tableau de bord est périmé', () => {
     setup({ ...fixtureDashboard, stale: true });
+    expect(screen.getByText(/Données du 25 octobre 2026/)).toBeInTheDocument();
+  });
+
+  it('date le bandeau au jour de Paris (23:30 UTC = lendemain)', () => {
+    setup({ ...fixtureDashboard, stale: true, lastSyncOk: '2026-10-24T23:30:00.000Z' });
     expect(screen.getByText(/Données du 25 octobre 2026/)).toBeInTheDocument();
   });
 

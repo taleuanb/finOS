@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { parisDate } from '@/domain/dates';
 import { formatMoney, formatPct } from '@/domain/money';
 import type { AssetClass, Currency } from '@/domain/types';
 import type { Dashboard, ValuedAsset } from '@/lib/dashboard';
@@ -42,7 +43,9 @@ function initials(name: string): string {
 }
 
 function readableDate(iso: string): string {
-  const d = new Date(`${iso.slice(0, 10)}T12:00:00Z`);
+  // Horodatage complet : le jour est celui de Paris (23:30 UTC = lendemain à Paris). Date seule : telle quelle.
+  const day = iso.length > 10 ? parisDate(new Date(iso)) : iso;
+  const d = new Date(`${day.slice(0, 10)}T12:00:00Z`);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'Europe/Paris' });
 }
@@ -119,12 +122,39 @@ function FilterSheet({
   const [draft, setDraft] = useState<string[]>(selected);
   const ref = useRef<HTMLDivElement>(null);
 
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; });
+
+  // Ouverture : mémorise l'élément déclencheur, place le focus dans la feuille et le rend à la fermeture.
   useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     ref.current?.focus();
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    return () => opener?.focus();
+  }, []);
+
+  // Échap ferme ; Tab / Maj+Tab restent dans la feuille.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { onCloseRef.current(); return; }
+      const dialog = ref.current;
+      if (e.key !== 'Tab' || !dialog) return;
+      const items = [...dialog.querySelectorAll<HTMLElement>('input, button')].filter((el) => !el.hasAttribute('disabled'));
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      const outside = !dialog.contains(active);
+      if (e.shiftKey && (outside || active === first || active === dialog)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (outside || active === last)) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  }, []);
 
   const toggle = (v: string) => setDraft((d) => (d.includes(v) ? d.filter((x) => x !== v) : [...d, v]));
 
@@ -193,7 +223,7 @@ function PositionRow({ row }: { row: RowModel }) {
         {row.sub ? <span className="truncate text-[12px] text-muted">{row.sub}</span> : null}
         {row.warning ? <span className="text-[12px] font-semibold text-loss">⚠ {row.warning}</span> : null}
       </div>
-      <div className="flex flex-col items-end gap-1">
+      <div className="flex flex-none flex-col items-end gap-1 whitespace-nowrap">
         <Money eur={row.eur} className="text-[14px] font-bold" />
         {row.original ? (
           <span className="text-[11px] text-muted">

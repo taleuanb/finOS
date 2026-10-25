@@ -1,0 +1,74 @@
+{
+  "object": "page",
+  "id": "p1111111-0000-4000-8000-000000000001",
+  "created_time": "2026-09-01T08:00:00.000Z",
+  "last_edited_time": "2026-10-24T05:00:12.000Z",
+  "created_by": {
+    "id": "u1",
+    "object": "user"
+  },
+  "last_edited_by": {
+    "id": "u1",
+    "object": "user"
+  },
+  "cover": null,
+  "icon": null,
+  "parent": {
+    "type": "data_source_id",
+    "data_source_id": "ds-1",
+    "database_id": "db-1"
+  },
+  "archived": false,
+  "in_trash": false,
+  "url": "https://www.notion.so/p1111111000040008000000000000001",
+  "public_url": null,
+  "properties": {
+    "Mois": {
+      "id": "title",
+      "type": "title",
+      "title": [
+        {
+          "type": "text",
+          "text": {
+            "content": "2026-11",
+            "link": null
+          },
+          "annotations": {
+            "bold": false,
+            "italic": false,
+            "strikethrough": false,
+            "underline": false,
+            "code": false,
+            "color": "default"
+          },
+          "plain_text": "2026-11",
+          "href": null
+        }
+      ]
+    },
+    "Actif": {
+      "id": "h1",
+      "type": "relation",
+      "relation": [
+        {
+          "id": "a1111111-0000-4000-8000-000000000001"
+        }
+      ],
+      "has_more": false
+    },
+    "Montant prévu": {
+      "id": "h2",
+      "type": "number",
+      "number": 405
+    },
+    "Origine": {
+      "id": "h3",
+      "type": "select",
+      "select": {
+        "id": "o-h3",
+        "name": "Signal métaux",
+        "color": "default"
+      }
+    }
+  }
+}

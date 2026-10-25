@@ -1,0 +1,144 @@
+{
+  "object": "page",
+  "id": "h2222222-0000-4000-8000-000000000001",
+  "created_time": "2026-09-01T08:00:00.000Z",
+  "last_edited_time": "2026-10-24T05:00:12.000Z",
+  "created_by": {
+    "id": "u1",
+    "object": "user"
+  },
+  "last_edited_by": {
+    "id": "u1",
+    "object": "user"
+  },
+  "cover": null,
+  "icon": null,
+  "parent": {
+    "type": "data_source_id",
+    "data_source_id": "ds-1",
+    "database_id": "db-1"
+  },
+  "archived": false,
+  "in_trash": false,
+  "url": "https://www.notion.so/h2222222000040008000000000000001",
+  "public_url": null,
+  "properties": {
+    "Nom": {
+      "id": "title",
+      "type": "title",
+      "title": [
+        {
+          "type": "text",
+          "text": {
+            "content": "2026-10-24",
+            "link": null
+          },
+          "annotations": {
+            "bold": false,
+            "italic": false,
+            "strikethrough": false,
+            "underline": false,
+            "code": false,
+            "color": "default"
+          },
+          "plain_text": "2026-10-24",
+          "href": null
+        }
+      ]
+    },
+    "Date": {
+      "id": "i1",
+      "type": "date",
+      "date": {
+        "start": "2026-10-24",
+        "end": null,
+        "time_zone": null
+      }
+    },
+    "Total actifs €": {
+      "id": "i2",
+      "type": "number",
+      "number": 586200
+    },
+    "Total dettes €": {
+      "id": "i3",
+      "type": "number",
+      "number": 182500
+    },
+    "Patrimoine net €": {
+      "id": "i4",
+      "type": "number",
+      "number": 403700
+    },
+    "Immobilier €": {
+      "id": "i10",
+      "type": "number",
+      "number": 480000
+    },
+    "Autres €": {
+      "id": "i11",
+      "type": "number",
+      "number": 3000
+    },
+    "Fonds & ETF €": {
+      "id": "i12",
+      "type": "number",
+      "number": 41000
+    },
+    "PER €": {
+      "id": "i13",
+      "type": "number",
+      "number": 9000
+    },
+    "Épargne €": {
+      "id": "i14",
+      "type": "number",
+      "number": 22000
+    },
+    "Crypto €": {
+      "id": "i15",
+      "type": "number",
+      "number": 4500
+    },
+    "Comptes courants €": {
+      "id": "i16",
+      "type": "number",
+      "number": 2500
+    },
+    "Startups €": {
+      "id": "i17",
+      "type": "number",
+      "number": 5000
+    },
+    "Métaux précieux €": {
+      "id": "i18",
+      "type": "number",
+      "number": 18000
+    },
+    "Noms de domaine €": {
+      "id": "i19",
+      "type": "number",
+      "number": 1200
+    },
+    "Ratio or/argent": {
+      "id": "i30",
+      "type": "number",
+      "number": 62.4
+    },
+    "EUR/MAD": {
+      "id": "i31",
+      "type": "number",
+      "number": 10.85
+    },
+    "EUR/USD": {
+      "id": "i32",
+      "type": "number",
+      "number": 1.08
+    },
+    "Partiel": {
+      "id": "i33",
+      "type": "checkbox",
+      "checkbox": true
+    }
+  }
+}

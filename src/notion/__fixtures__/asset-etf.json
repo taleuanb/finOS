@@ -1,0 +1,246 @@
+{
+  "object": "page",
+  "id": "a1111111-0000-4000-8000-000000000001",
+  "created_time": "2026-09-01T08:00:00.000Z",
+  "last_edited_time": "2026-10-24T05:00:12.000Z",
+  "created_by": {
+    "id": "u1",
+    "object": "user"
+  },
+  "last_edited_by": {
+    "id": "u1",
+    "object": "user"
+  },
+  "cover": null,
+  "icon": null,
+  "parent": {
+    "type": "data_source_id",
+    "data_source_id": "ds-1",
+    "database_id": "db-1"
+  },
+  "archived": false,
+  "in_trash": false,
+  "url": "https://www.notion.so/a1111111000040008000000000000001",
+  "public_url": null,
+  "properties": {
+    "Nom": {
+      "id": "title",
+      "type": "title",
+      "title": [
+        {
+          "type": "text",
+          "text": {
+            "content": "iShares Core S&P 500",
+            "link": null
+          },
+          "annotations": {
+            "bold": false,
+            "italic": false,
+            "strikethrough": false,
+            "underline": false,
+            "code": false,
+            "color": "default"
+          },
+          "plain_text": "iShares Core S&P 500",
+          "href": null
+        }
+      ]
+    },
+    "Classe": {
+      "id": "c1",
+      "type": "select",
+      "select": {
+        "id": "o-c1",
+        "name": "Fonds & ETF",
+        "color": "default"
+      }
+    },
+    "Sous-type": {
+      "id": "c2",
+      "type": "rich_text",
+      "rich_text": [
+        {
+          "type": "text",
+          "text": {
+            "content": "ETF",
+            "link": null
+          },
+          "annotations": {
+            "bold": false,
+            "italic": false,
+            "strikethrough": false,
+            "underline": false,
+            "code": false,
+            "color": "default"
+          },
+          "plain_text": "ETF",
+          "href": null
+        }
+      ]
+    },
+    "Établissement": {
+      "id": "c3",
+      "type": "select",
+      "select": {
+        "id": "o-c3",
+        "name": "Revolut",
+        "color": "default"
+      }
+    },
+    "Devise": {
+      "id": "c4",
+      "type": "select",
+      "select": {
+        "id": "o-c4",
+        "name": "USD",
+        "color": "default"
+      }
+    },
+    "Valorisation": {
+      "id": "c5",
+      "type": "select",
+      "select": {
+        "id": "o-c5",
+        "name": "Auto",
+        "color": "default"
+      }
+    },
+    "Identifiant cotation": {
+      "id": "c6",
+      "type": "rich_text",
+      "rich_text": [
+        {
+          "type": "text",
+          "text": {
+            "content": "CSPX.L",
+            "link": null
+          },
+          "annotations": {
+            "bold": false,
+            "italic": false,
+            "strikethrough": false,
+            "underline": false,
+            "code": false,
+            "color": "default"
+          },
+          "plain_text": "CSPX.L",
+          "href": null
+        }
+      ]
+    },
+    "Valeur manuelle": {
+      "id": "c7",
+      "type": "number",
+      "number": null
+    },
+    "Date valeur manuelle": {
+      "id": "c8",
+      "type": "date",
+      "date": null
+    },
+    "Quantité": {
+      "id": "c9",
+      "type": "rollup",
+      "rollup": {
+        "type": "number",
+        "number": 12.5,
+        "function": "sum"
+      }
+    },
+    "Prix de revient": {
+      "id": "c10",
+      "type": "rollup",
+      "rollup": {
+        "type": "number",
+        "number": 7450.25,
+        "function": "sum"
+      }
+    },
+    "Cours unitaire": {
+      "id": "c11",
+      "type": "number",
+      "number": 615.4
+    },
+    "Valeur": {
+      "id": "c12",
+      "type": "number",
+      "number": 7692.5
+    },
+    "Valeur €": {
+      "id": "c13",
+      "type": "number",
+      "number": 7123.61
+    },
+    "Plus-value": {
+      "id": "c14",
+      "type": "formula",
+      "formula": {
+        "type": "number",
+        "number": 242.25
+      }
+    },
+    "%": {
+      "id": "c15",
+      "type": "formula",
+      "formula": {
+        "type": "number",
+        "number": 0.0325
+      }
+    },
+    "Versement fixe mensuel": {
+      "id": "c16",
+      "type": "number",
+      "number": null
+    },
+    "Statut sync": {
+      "id": "c17",
+      "type": "rich_text",
+      "rich_text": [
+        {
+          "type": "text",
+          "text": {
+            "content": "OK",
+            "link": null
+          },
+          "annotations": {
+            "bold": false,
+            "italic": false,
+            "strikethrough": false,
+            "underline": false,
+            "code": false,
+            "color": "default"
+          },
+          "plain_text": "OK",
+          "href": null
+        }
+      ]
+    },
+    "Dernière MAJ": {
+      "id": "c18",
+      "type": "date",
+      "date": {
+        "start": "2026-10-24",
+        "end": null,
+        "time_zone": null
+      }
+    },
+    "Archivé": {
+      "id": "c19",
+      "type": "checkbox",
+      "checkbox": false
+    },
+    "Mouvements": {
+      "id": "c20",
+      "type": "relation",
+      "relation": [
+        {
+          "id": "m1111111-0000-4000-8000-000000000001"
+        },
+        {
+          "id": "m1111111-0000-4000-8000-000000000002"
+        }
+      ],
+      "has_more": false
+    }
+  }
+}

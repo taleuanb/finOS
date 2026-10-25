@@ -5,6 +5,7 @@ import {
   pageToPlanLine, pageToSnapshot, pageToStrategyRow, planLineToProperties, rowsToStrategy, snapshotToProperties,
   strategyEntryToProperties, valuationToProperties, type NotionPage, type NotionProps,
 } from './mappers';
+import { parisDate } from '@/domain/dates';
 import type { Repo } from './repo';
 import { DB, P } from './schema';
 
@@ -21,7 +22,11 @@ export interface NotionClientLike {
       page_size?: number;
       filter?: QueryFilter;
       sorts?: { property: string; direction: 'ascending' | 'descending' }[];
+      /** Identifiants (pas les noms) des propriétés à renvoyer ; absent = toutes. */
+      filter_properties?: string[];
     }): Promise<{ results: unknown[]; has_more: boolean; next_cursor: string | null }>;
+    /** Schéma de la base (pour convertir noms de colonnes -> identifiants). Absent : requêtes non filtrées. */
+    retrieve?(args: { data_source_id: string }): Promise<{ properties?: Record<string, { id: string; type?: string }> }>;
   };
   pages: {
     create(args: { parent: { type: 'data_source_id'; data_source_id: string }; properties: NotionProps }): Promise<{ id: string }>;
@@ -36,15 +41,74 @@ export type Limit = <T>(fn: () => Promise<T>) => Promise<T>;
 
 const identity: Limit = (fn) => fn();
 
+/** Profondeur de l'historique lu par défaut (jours) : au-delà, les graphiques n'en ont pas besoin. */
+const HISTORY_DAYS = 800;
+
+/** Noms des colonnes d'une base, sauf celles listées (calculées par Notion, jamais lues par les mappers). */
+const columns = <T extends Record<string, string>>(props: T, ...omit: (keyof T)[]): string[] =>
+  (Object.keys(props) as (keyof T)[]).filter((k) => !omit.includes(k)).map((k) => props[k]);
+
+/**
+ * Colonnes réellement lues par les mappers (le titre y figure toujours). Les colonnes calculées par Notion
+ * (rollups Quantité / Prix de revient / Mouvements, formules Plus-value / % / Quantité signée / Montant signé / Prime %)
+ * sont exclues : quantités et prix de revient viennent des mouvements (`positions.ts`).
+ */
+const ASSET_COLUMNS = columns(P.assets, 'quantity', 'costBasis', 'gain', 'gainPct', 'movements');
+const MOVEMENT_COLUMNS = columns(P.movements, 'signedQuantity', 'signedAmount', 'premium');
+const DEBT_COLUMNS = columns(P.debts);
+const BUDGET_COLUMNS = columns(P.budget);
+const STRATEGY_COLUMNS = columns(P.strategy);
+const PLAN_COLUMNS = columns(P.plan);
+const HISTORY_COLUMNS = [
+  P.history.title, P.history.date, P.history.totalAssetsEur, P.history.totalDebtsEur, P.history.netEur,
+  ...Object.values(P.history.byClass), P.history.goldSilverRatio, P.history.eurMad, P.history.eurUsd, P.history.partial,
+];
+
 const isPage = (r: unknown): r is NotionPage =>
   typeof r === 'object' && r !== null && typeof (r as NotionPage).id === 'string' && typeof (r as NotionPage).properties === 'object' && (r as NotionPage).properties !== null;
 
 export function createNotionRepo(client: NotionClientLike, ids: Record<keyof typeof DB, string>, limit: Limit = identity): Repo {
-  /** Lit toutes les pages d'une base en suivant `has_more` / `next_cursor`. */
+  /** Noms -> identifiants de propriétés par base (un `retrieve` par base et par processus, échecs non mémorisés). */
+  const schemas = new Map<string, Promise<Map<string, { id: string; type?: string }> | null>>();
+  function schemaOf(dsId: string): Promise<Map<string, { id: string; type?: string }> | null> {
+    const known = schemas.get(dsId);
+    if (known) return known;
+    const loading = (async () => {
+      const retrieve = client.dataSources.retrieve;
+      if (!retrieve) return null;
+      try {
+        const ds = await limit(() => retrieve.call(client.dataSources, { data_source_id: dsId }));
+        return ds.properties ? new Map(Object.entries(ds.properties)) : null;
+      } catch (e) {
+        console.error('Notion : schéma illisible, lecture non filtrée', e instanceof Error ? e.message : e);
+        schemas.delete(dsId);
+        return null;
+      }
+    })();
+    schemas.set(dsId, loading);
+    return loading;
+  }
+
+  /** Identifiants des colonnes demandées (+ le titre) ; `undefined` = pas de filtre (schéma indisponible). */
+  async function filterPropertyIds(dsId: string, names: readonly string[]): Promise<string[] | undefined> {
+    const schema = await schemaOf(dsId);
+    if (!schema) return undefined;
+    const ids = new Set<string>();
+    for (const [name, def] of schema) if (def.type === 'title' || names.includes(name)) ids.add(def.id);
+    return ids.size > 0 ? [...ids] : undefined;
+  }
+
+  /**
+   * Lit toutes les pages d'une base en suivant `has_more` / `next_cursor`. `props` : noms des seules colonnes
+   * à renvoyer (`filter_properties`) ; une optimisation, jamais une cause d'échec (sans schéma : toutes les colonnes).
+   */
   async function queryAll(
     dsId: string,
-    opts: { filter?: QueryFilter; sorts?: { property: string; direction: 'ascending' | 'descending' }[] } = {},
+    opts: {
+      filter?: QueryFilter; sorts?: { property: string; direction: 'ascending' | 'descending' }[]; props?: readonly string[];
+    } = {},
   ): Promise<NotionPage[]> {
+    const filterProperties = opts.props ? await filterPropertyIds(dsId, opts.props) : undefined;
     const pages: NotionPage[] = [];
     let cursor: string | undefined;
     do {
@@ -56,6 +120,7 @@ export function createNotionRepo(client: NotionClientLike, ids: Record<keyof typ
           ...(start ? { start_cursor: start } : {}),
           ...(opts.filter ? { filter: opts.filter } : {}),
           ...(opts.sorts ? { sorts: opts.sorts } : {}),
+          ...(filterProperties ? { filter_properties: filterProperties } : {}),
         }),
       );
       pages.push(...res.results.filter(isPage)); // les résultats partiels (sans propriétés) sont écartés
@@ -83,28 +148,31 @@ export function createNotionRepo(client: NotionClientLike, ids: Record<keyof typ
 
   return {
     async listAssets(): Promise<Asset[]> {
-      return (await queryAll(ids.assets)).map(pageToAsset);
+      return (await queryAll(ids.assets, { props: ASSET_COLUMNS })).map(pageToAsset);
     },
     async listMovements(): Promise<Movement[]> {
-      return (await queryAll(ids.movements)).map(pageToMovement);
+      return (await queryAll(ids.movements, { props: MOVEMENT_COLUMNS })).map(pageToMovement);
     },
     async listDebts(): Promise<Debt[]> {
-      return (await queryAll(ids.debts)).map(pageToDebt);
+      return (await queryAll(ids.debts, { props: DEBT_COLUMNS })).map(pageToDebt);
     },
     async listBudget(): Promise<BudgetLine[]> {
-      const lines = (await queryAll(ids.budget)).map(pageToBudgetLine);
+      const lines = (await queryAll(ids.budget, { props: BUDGET_COLUMNS })).map(pageToBudgetLine);
       return lines.sort((a, b) => a.order - b.order);
     },
     async getStrategy(): Promise<Strategy> {
-      return rowsToStrategy(await queryAll(ids.strategy));
+      return rowsToStrategy(await queryAll(ids.strategy, { props: STRATEGY_COLUMNS }));
     },
     async listPlan(): Promise<PlanLine[]> {
-      return (await queryAll(ids.plan)).map(pageToPlanLine);
+      return (await queryAll(ids.plan, { props: PLAN_COLUMNS })).map(pageToPlanLine);
     },
     async listSnapshots(sinceDate?: string): Promise<Snapshot[]> {
+      // Sans date : les 800 derniers jours seulement (la première photo n'est pas indispensable).
+      const since = sinceDate ?? parisDate(new Date(Date.now() - HISTORY_DAYS * 86_400_000));
       const pages = await queryAll(ids.history, {
-        ...(sinceDate ? { filter: { property: P.history.date, date: { on_or_after: sinceDate } } } : {}),
+        filter: { property: P.history.date, date: { on_or_after: since } },
         sorts: [{ property: P.history.date, direction: 'ascending' }],
+        props: HISTORY_COLUMNS,
       });
       return pages.map(pageToSnapshot).sort((a, b) => a.date.localeCompare(b.date));
     },

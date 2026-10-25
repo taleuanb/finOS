@@ -47,4 +47,13 @@ describe('getRepo', () => {
     expect(repo).not.toBeInstanceOf(FakeRepo);
     expect(typeof repo.listAssets).toBe('function');
   });
+
+  it('réutilise le même Repo Notion tant que les variables ne changent pas', () => {
+    vi.stubEnv('NOTION_TOKEN', 'secret_test');
+    for (const v of DB_VARS) vi.stubEnv(v, `ds-${v}`);
+    const repo = getRepo();
+    expect(getRepo()).toBe(repo);
+    vi.stubEnv('NOTION_DB_ASSETS', 'ds-autre');
+    expect(getRepo()).not.toBe(repo);
+  });
 });

@@ -1,11 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Client } from '@notionhq/client';
 import assetEtf from './__fixtures__/asset-etf.json';
+import movementFixture from './__fixtures__/movement.json';
 import assetManual from './__fixtures__/asset-manual-no-currency.json';
 import snapshot from './__fixtures__/snapshot.json';
 import strategyRows from './__fixtures__/strategy-rows.json';
+import { pageToAsset, pageToMovement } from './mappers';
 import { createNotionRepo, type Limit, type NotionClientLike } from './notionRepo';
-import { DB } from './schema';
+import { DB, P } from './schema';
 import type { Snapshot } from '@/domain/types';
 
 const ids = Object.fromEntries(Object.keys(DB).map((k) => [k, `ds-${k}`])) as Record<keyof typeof DB, string>;
@@ -240,6 +242,135 @@ describe('écriture : actifs, crédits, Stratégie', () => {
     await repo.deleteDebt('d');
     await repo.setStrategyEntry({ key: 'k', value: 1 }); // requête + création
     expect(spy).toHaveBeenCalledTimes(7);
+  });
+});
+
+/** Faux client qui connaît le schéma des bases et applique `filter_properties` (identifiants) comme Notion. */
+function schemaClient(pages: Record<string, unknown[]>, schema: Record<string, Record<string, { id: string; type: string }>>, opts: { retrieveFails?: boolean } = {}) {
+  const queries: (Q & { filter_properties?: string[] })[] = [];
+  const retrieve = vi.fn(async (args: { data_source_id: string }) => {
+    if (opts.retrieveFails) throw new Error('Notion indisponible');
+    return { properties: schema[args.data_source_id] };
+  });
+  const client: NotionClientLike = {
+    dataSources: {
+      query: vi.fn(async (args: Q & { filter_properties?: string[] }) => {
+        queries.push(args);
+        const defs = schema[args.data_source_id] ?? {};
+        const keep = args.filter_properties ? new Set(args.filter_properties) : null;
+        const results = (pages[args.data_source_id] ?? []).map((raw) => {
+          const page = raw as { id: string; properties: Record<string, unknown> };
+          if (!keep) return page;
+          const properties = Object.fromEntries(Object.entries(page.properties).filter(([name]) => defs[name] && keep.has(defs[name].id)));
+          return { ...page, properties };
+        });
+        return { results, has_more: false, next_cursor: null };
+      }),
+      retrieve,
+    },
+    pages: { create: vi.fn(async () => ({ id: 'x' })), update: vi.fn(async () => ({})) },
+  };
+  return { client, queries, retrieve };
+}
+
+const schemaOf = (page: { properties: Record<string, { type: string }> }) =>
+  Object.fromEntries(Object.entries(page.properties).map(([name, p]) => [name, { id: `id:${name}`, type: p.type }]));
+
+const COMPUTED_ASSET = ['Quantité', 'Prix de revient', 'Plus-value', '%', 'Mouvements'];
+
+describe('colonnes utiles (filter_properties)', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("les requêtes d'actifs envoient les identifiants des colonnes lues, sans les colonnes calculées", async () => {
+    const { client, queries, retrieve } = schemaClient({ 'ds-assets': [assetEtf] }, { 'ds-assets': schemaOf(assetEtf) });
+    await createNotionRepo(client, ids).listAssets();
+    const sent = new Set(queries[0].filter_properties);
+    expect(sent.has('id:Nom')).toBe(true); // le titre est toujours demandé
+    for (const name of Object.values(P.assets).filter((n) => !COMPUTED_ASSET.includes(n))) expect(sent.has(`id:${name}`), name).toBe(true);
+    for (const name of COMPUTED_ASSET) expect(sent.has(`id:${name}`), name).toBe(false);
+    expect(retrieve).toHaveBeenCalledTimes(1);
+  });
+
+  it("les requêtes de mouvements excluent Quantité signée, Montant signé et Prime %", async () => {
+    const withSigned = structuredClone(movementFixture) as typeof movementFixture & { properties: Record<string, unknown> };
+    withSigned.properties['Quantité signée'] = { type: 'formula', formula: { type: 'number', number: 99 } };
+    withSigned.properties['Montant signé'] = { type: 'formula', formula: { type: 'number', number: 99 } };
+    const { client, queries } = schemaClient({ 'ds-movements': [withSigned] }, { 'ds-movements': schemaOf(withSigned as never) });
+    const [m] = await createNotionRepo(client, ids).listMovements();
+    const sent = new Set(queries[0].filter_properties);
+    for (const name of ['Quantité signée', 'Montant signé', 'Prime %']) expect(sent.has(`id:${name}`), name).toBe(false);
+    for (const name of ['Libellé', 'Date', 'Actif', 'Type', 'Nature', 'Quantité', 'Montant', 'Cours spot jour J', 'Mois du plan']) expect(sent.has(`id:${name}`), name).toBe(true);
+    expect(m).toEqual(pageToMovement(movementFixture)); // les colonnes exclues ne servent à aucun champ
+  });
+
+  it("un actif lu sans les colonnes calculées garde tous ses autres champs ; quantité et prix de revient valent 0", async () => {
+    const { client } = schemaClient({ 'ds-assets': [assetEtf] }, { 'ds-assets': schemaOf(assetEtf) });
+    const [a] = await createNotionRepo(client, ids).listAssets();
+    const full = pageToAsset(assetEtf);
+    expect(full.quantity).not.toBe(0);
+    expect(a).toEqual({ ...full, quantity: 0, costBasis: 0 });
+  });
+
+  it('chaque base de lecture filtre ses colonnes (dettes, budget, Stratégie, plan, historique)', async () => {
+    const stub = { id: 'p', properties: { Nom: { type: 'title', title: [] } } };
+    const defs = { 'ds-debts': 'Nom', 'ds-budget': 'Nom', 'ds-strategy': 'Clé', 'ds-plan': 'Mois', 'ds-history': 'Nom' } as const;
+    const schema = Object.fromEntries(Object.entries(defs).map(([ds, title]) => [ds, { [title]: { id: `id:${title}`, type: 'title' }, Autre: { id: 'id:Autre', type: 'number' } }]));
+    const { client, queries } = schemaClient(Object.fromEntries(Object.keys(defs).map((ds) => [ds, [stub]])), schema);
+    const repo = createNotionRepo(client, ids);
+    await Promise.all([repo.listDebts(), repo.listBudget(), repo.getStrategy(), repo.listPlan(), repo.listSnapshots()]);
+    expect(queries).toHaveLength(5);
+    for (const q of queries) expect(q.filter_properties).toContain(`id:${defs[q.data_source_id as keyof typeof defs]}`);
+  });
+
+  it("le schéma n'est lu qu'une fois par base (mémoïsé)", async () => {
+    const { client, retrieve } = schemaClient({ 'ds-assets': [assetEtf] }, { 'ds-assets': schemaOf(assetEtf) });
+    const repo = createNotionRepo(client, ids);
+    await repo.listAssets();
+    await repo.listAssets();
+    expect(retrieve).toHaveBeenCalledTimes(1);
+  });
+
+  it("le retrieve passe par limit", async () => {
+    const { client } = schemaClient({ 'ds-assets': [assetEtf] }, { 'ds-assets': schemaOf(assetEtf) });
+    const spy = vi.fn((fn: () => Promise<unknown>) => fn());
+    await createNotionRepo(client, ids, spy as unknown as Limit).listAssets();
+    expect(spy).toHaveBeenCalledTimes(2); // retrieve + une page de résultats
+  });
+
+  it("si le schéma est illisible, lit sans filtre au lieu d'échouer (et réessaie plus tard)", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client, queries, retrieve } = schemaClient({ 'ds-assets': [assetEtf] }, { 'ds-assets': schemaOf(assetEtf) }, { retrieveFails: true });
+    const repo = createNotionRepo(client, ids);
+    const [a] = await repo.listAssets();
+    expect(queries[0].filter_properties).toBeUndefined();
+    expect(a.quantity).toBe(pageToAsset(assetEtf).quantity); // non filtré : tout est lu
+    await repo.listAssets();
+    expect(retrieve).toHaveBeenCalledTimes(2);
+  });
+
+  it("sans retrieve dans le client : lecture non filtrée", async () => {
+    const { client, queries } = fakeClient({ 'ds-assets': [[assetEtf]] });
+    await createNotionRepo(client, ids).listAssets();
+    expect(queries[0]).not.toHaveProperty('filter_properties');
+  });
+});
+
+describe('historique borné', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('listSnapshots() sans argument ne lit que les 800 derniers jours (date de Paris)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-26T10:00:00Z'));
+    const { client, queries } = fakeClient({ 'ds-history': [[snapshot]] });
+    await createNotionRepo(client, ids).listSnapshots();
+    expect(queries[0].filter).toEqual({ property: 'Date', date: { on_or_after: '2024-08-17' } });
+    expect(queries[0].sorts).toEqual([{ property: 'Date', direction: 'ascending' }]);
+  });
+
+  it('un sinceDate explicite est respecté tel quel', async () => {
+    const { client, queries } = fakeClient({ 'ds-history': [[snapshot]] });
+    await createNotionRepo(client, ids).listSnapshots('2020-01-01');
+    expect(queries[0].filter).toEqual({ property: 'Date', date: { on_or_after: '2020-01-01' } });
   });
 });
 

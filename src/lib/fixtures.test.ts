@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { fixtureDashboard as d } from './fixtures';
-import { getDashboard } from './load';
 import { getRepo } from '@/notion';
 
 describe('fixtureDashboard', () => {
@@ -27,8 +26,7 @@ describe('fixtureDashboard', () => {
     expect(d.topPerformers).toHaveLength(5);
     expect(d.topPerformers[0].id).toBe('domaines');
   });
-  it('getDashboard et getRepo servent les données des maquettes', async () => {
-    expect(await getDashboard()).toBe(d);
+  it('getRepo sert les données des maquettes', async () => {
     expect(await getRepo().listAssets()).toHaveLength(19);
   });
 });

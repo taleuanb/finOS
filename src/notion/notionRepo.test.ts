@@ -260,6 +260,9 @@ function schemaClient(pages: Record<string, unknown[]>, schema: Record<string, R
       query: vi.fn(async (args: Q & { filter_properties?: string[] }) => {
         queries.push(args);
         const defs = schema[args.data_source_id] ?? {};
+        const known = new Set(Object.values(defs).map((d) => d.id));
+        // Comme Notion : un identifiant de propriété inconnu est une erreur de validation (400).
+        if (args.filter_properties?.some((id) => !known.has(id))) throw Object.assign(new Error('validation_error'), { status: 400 });
         const keep = args.filter_properties ? new Set(args.filter_properties) : null;
         const results = (pages[args.data_source_id] ?? []).map((raw) => {
           const page = raw as { id: string; properties: Record<string, unknown> };
@@ -407,6 +410,87 @@ describe('colonnes utiles (filter_properties)', () => {
     const { client, queries } = fakeClient({ 'ds-assets': [[assetEtf]] });
     await createNotionRepo(client, ids).listAssets();
     expect(queries[0]).not.toHaveProperty('filter_properties');
+  });
+});
+
+describe('schéma : mémo par instance, colonne absente, identifiant périmé', () => {
+  afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it('un chargeur fourni n\'est appelé qu\'une fois par base entre deux lectures, puis de nouveau après 1 h', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const { client } = schemaClient({ 'ds-assets': [assetEtf] }, { 'ds-assets': schemaOf(assetEtf) });
+    const loader = vi.fn(async (_dsId: string) => schemaOf(assetEtf));
+    const repo = createNotionRepo(client, ids, undefined, { schema: loader });
+    await repo.listAssets();
+    await repo.listAssets();
+    expect(loader).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(61 * 60_000);
+    await repo.listAssets();
+    expect(loader).toHaveBeenCalledTimes(2);
+  });
+
+  it("un échec du chargeur n'est jamais mémorisé", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { client } = schemaClient({ 'ds-assets': [assetEtf] }, { 'ds-assets': schemaOf(assetEtf) });
+    const loader = vi.fn<(dsId: string) => Promise<ReturnType<typeof schemaOf>>>()
+      .mockRejectedValueOnce(new Error('KO')).mockResolvedValue(schemaOf(assetEtf));
+    const repo = createNotionRepo(client, ids, undefined, { schema: loader });
+    await repo.listAssets();
+    await repo.listAssets();
+    expect(loader).toHaveBeenCalledTimes(2);
+  });
+
+  it("colonne demandée absente du schéma mémorisé : un seul rechargement ; si elle est apparue, la lecture reste filtrée et l'inclut", async () => {
+    const full = schemaOf(assetEtf);
+    const { 'Versement fixe mensuel': _gone, ...without } = full;
+    const schema = { 'ds-assets': without };
+    const { client, queries, retrieve } = schemaClient({ 'ds-assets': [assetEtf] }, schema);
+    const repo = createNotionRepo(client, ids);
+    await repo.listAssets(); // absente : rechargement, toujours absente -> lecture non filtrée
+    expect(retrieve).toHaveBeenCalledTimes(2);
+    expect(queries[0].filter_properties).toBeUndefined();
+    schema['ds-assets'] = full; // la colonne est (re)créée
+    const [a] = await repo.listAssets();
+    expect(retrieve).toHaveBeenCalledTimes(3);
+    expect(queries[1].filter_properties).toContain('id:Versement fixe mensuel');
+    expect(a.fixedMonthly).toBe(pageToAsset(assetEtf).fixedMonthly);
+    await repo.listAssets(); // schéma complet mémorisé : plus de rechargement
+    expect(retrieve).toHaveBeenCalledTimes(3);
+  });
+
+  it("une colonne recréée avec un nouvel identifiant est reprise au rechargement", async () => {
+    const full = schemaOf(assetEtf);
+    const { 'Statut sync': _old, ...without } = full;
+    const schema = { 'ds-assets': without };
+    const { client, queries } = schemaClient({ 'ds-assets': [assetEtf] }, schema);
+    const repo = createNotionRepo(client, ids);
+    await repo.listAssets();
+    schema['ds-assets'] = { ...without, 'Statut sync': { id: 'id:Statut sync:v2', type: 'rich_text' } };
+    await repo.listAssets();
+    expect(queries.at(-1)?.filter_properties).toContain('id:Statut sync:v2');
+  });
+
+  it("une requête filtrée rejetée (identifiant périmé, 400) est rejouée une fois sans filtre et invalide le mémo", async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const full = schemaOf(assetEtf);
+    const schema = { 'ds-assets': full };
+    const { client, queries, retrieve } = schemaClient({ 'ds-assets': [assetEtf] }, schema);
+    const repo = createNotionRepo(client, ids);
+    await repo.listAssets(); // mémo : 'Statut sync' = id:Statut sync
+    schema['ds-assets'] = { ...full, 'Statut sync': { id: 'id:Statut sync:v2', type: 'rich_text' } }; // recréée entre-temps
+    const [a] = await repo.listAssets();
+    expect(a.name).toBe(pageToAsset(assetEtf).name); // la lecture n'échoue pas
+    expect(queries.map((q) => q.filter_properties !== undefined)).toEqual([true, true, false]);
+    await repo.listAssets(); // mémo invalidé : nouveau schéma, requête filtrée valide
+    expect(retrieve).toHaveBeenCalledTimes(2);
+    expect(queries.at(-1)?.filter_properties).toContain('id:Statut sync:v2');
+  });
+
+  it("une erreur autre qu'un 400 n'est pas rejouée sans filtre", async () => {
+    const { client, queries } = schemaClient({ 'ds-assets': [assetEtf] }, { 'ds-assets': schemaOf(assetEtf) });
+    (client.dataSources.query as ReturnType<typeof vi.fn>).mockRejectedValueOnce(Object.assign(new Error('Notion down'), { status: 502 }));
+    await expect(createNotionRepo(client, ids).listAssets()).rejects.toThrow('Notion down');
+    expect(queries).toHaveLength(0);
   });
 });
 

@@ -76,36 +76,52 @@ export async function retrieveSchema(client: NotionClientLike, dsId: string, lim
   return Object.fromEntries(Object.entries(ds.properties).map(([name, def]) => [name, { id: def.id, type: def.type ?? '' }]));
 }
 
-/** Durée de vie, par instance, du schéma mémorisé quand aucun chargeur n'est fourni (une colonne renommée y est reprise). */
+/** Durée de vie, par instance, du schéma mémorisé (un identifiant de colonne recréée y est repris). */
 const SCHEMA_TTL_MS = 3_600_000;
 
+/** Erreur de validation Notion (400) : p. ex. un identifiant de propriété inconnu dans `filter_properties`. */
+const isValidationError = (e: unknown): boolean =>
+  typeof e === 'object' && e !== null && ((e as { status?: unknown }).status === 400 || (e as { code?: unknown }).code === 'validation_error');
+
 /**
- * `opts.schema` : chargeur du schéma d'une base, typiquement mis en cache entre instances (`unstable_cache`) ;
- * par défaut, un `retrieve` mémorisé par instance pendant 1 h. Dans tous les cas, un échec donne une lecture non filtrée.
+ * `opts.schema` : chargeur du schéma d'une base (par défaut, un `retrieve` Notion). Son résultat est mémorisé par
+ * instance pendant 1 h (jamais un échec). Une colonne demandée mais absente du schéma mémorisé le fait recharger une fois ;
+ * si elle manque toujours, ou si le schéma est illisible, la base est lue sans filtre : l'optimisation ne fait jamais échouer une lecture.
  */
 export function createNotionRepo(
   client: NotionClientLike, ids: Record<keyof typeof DB, string>, limit: Limit = identity,
   opts: { schema?: (dsId: string) => Promise<DataSourceSchema> } = {},
 ): Repo {
+  const loader = opts.schema ?? ((dsId: string) => retrieveSchema(client, dsId, limit));
+  const canReadSchema = opts.schema !== undefined || client.dataSources.retrieve !== undefined;
   const memo = new Map<string, { at: number; schema: Promise<DataSourceSchema> }>();
-  const loadSchema = opts.schema ?? ((dsId: string): Promise<DataSourceSchema> => {
+
+  /** Schéma mémorisé de la base ; `fresh` ignore le mémo et le remplace. */
+  function schemaOf(dsId: string, fresh = false): Promise<DataSourceSchema> {
     const known = memo.get(dsId);
-    if (known && Date.now() - known.at < SCHEMA_TTL_MS) return known.schema;
-    const schema = retrieveSchema(client, dsId, limit);
+    if (!fresh && known && Date.now() - known.at < SCHEMA_TTL_MS) return known.schema;
+    const schema = loader(dsId);
     memo.set(dsId, { at: Date.now(), schema });
     schema.catch(() => { if (memo.get(dsId)?.schema === schema) memo.delete(dsId); }); // un échec n'est jamais mémorisé
     return schema;
-  });
-  const canReadSchema = opts.schema !== undefined || client.dataSources.retrieve !== undefined;
+  }
 
-  /** Identifiants des colonnes demandées (+ le titre) ; `undefined` = pas de filtre (schéma indisponible). */
+  /** Identifiants des colonnes demandées (+ le titre) ; `undefined` = pas de filtre (schéma illisible ou colonne absente). */
   async function filterPropertyIds(dsId: string, names: readonly string[]): Promise<string[] | undefined> {
     if (!canReadSchema) return undefined;
     try {
-      const schema = await loadSchema(dsId);
-      const ids = new Set<string>();
-      for (const [name, def] of Object.entries(schema)) if (def.type === 'title' || names.includes(name)) ids.add(def.id);
-      return ids.size > 0 ? [...ids] : undefined;
+      let schema = await schemaOf(dsId);
+      if (names.some((n) => !(n in schema))) {
+        schema = await schemaOf(dsId, true); // schéma périmé ? un seul rechargement
+        const missing = names.filter((n) => !(n in schema));
+        if (missing.length > 0) {
+          console.error(`Notion : colonnes absentes (${missing.join(', ')}), lecture non filtrée`);
+          return undefined;
+        }
+      }
+      const found = new Set<string>();
+      for (const [name, def] of Object.entries(schema)) if (def.type === 'title' || names.includes(name)) found.add(def.id);
+      return found.size > 0 ? [...found] : undefined;
     } catch (e) {
       console.error('Notion : schéma illisible, lecture non filtrée', e instanceof Error ? e.message : e);
       return undefined;
@@ -122,25 +138,37 @@ export function createNotionRepo(
       filter?: QueryFilter; sorts?: { property: string; direction: 'ascending' | 'descending' }[]; props?: readonly string[];
     } = {},
   ): Promise<NotionPage[]> {
+    const run = async (filterProperties: string[] | undefined): Promise<NotionPage[]> => {
+      const pages: NotionPage[] = [];
+      let cursor: string | undefined;
+      do {
+        const start = cursor;
+        const res = await limit(() =>
+          client.dataSources.query({
+            data_source_id: dsId,
+            page_size: 100,
+            ...(start ? { start_cursor: start } : {}),
+            ...(opts.filter ? { filter: opts.filter } : {}),
+            ...(opts.sorts ? { sorts: opts.sorts } : {}),
+            ...(filterProperties ? { filter_properties: filterProperties } : {}),
+          }),
+        );
+        pages.push(...res.results.filter(isPage)); // les résultats partiels (sans propriétés) sont écartés
+        cursor = res.has_more && res.next_cursor ? res.next_cursor : undefined;
+      } while (cursor);
+      return pages;
+    };
     const filterProperties = opts.props ? await filterPropertyIds(dsId, opts.props) : undefined;
-    const pages: NotionPage[] = [];
-    let cursor: string | undefined;
-    do {
-      const start = cursor;
-      const res = await limit(() =>
-        client.dataSources.query({
-          data_source_id: dsId,
-          page_size: 100,
-          ...(start ? { start_cursor: start } : {}),
-          ...(opts.filter ? { filter: opts.filter } : {}),
-          ...(opts.sorts ? { sorts: opts.sorts } : {}),
-          ...(filterProperties ? { filter_properties: filterProperties } : {}),
-        }),
-      );
-      pages.push(...res.results.filter(isPage)); // les résultats partiels (sans propriétés) sont écartés
-      cursor = res.has_more && res.next_cursor ? res.next_cursor : undefined;
-    } while (cursor);
-    return pages;
+    if (!filterProperties) return run(undefined);
+    try {
+      return await run(filterProperties);
+    } catch (e) {
+      if (!isValidationError(e)) throw e;
+      // Identifiant de propriété périmé (colonne recréée) : on oublie le schéma et on relit sans filtre, une fois.
+      console.error('Notion : filter_properties rejeté, lecture non filtrée', e instanceof Error ? e.message : e);
+      memo.delete(dsId);
+      return run(undefined);
+    }
   }
 
   const create = async (dsId: string, properties: NotionProps): Promise<string> => {

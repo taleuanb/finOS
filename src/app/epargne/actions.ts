@@ -1,6 +1,6 @@
 'use server';
 
-import { revalidateTag } from 'next/cache';
+import { revalidateNotion } from '@/lib/cacheTags';
 import type { AllocationLine } from '@/domain/types';
 import { getRepo } from '@/notion';
 import { declarePurchaseWith, validatePlanWith, type ActionResult } from './planOps';
@@ -9,7 +9,7 @@ import { declarePurchaseWith, validatePlanWith, type ActionResult } from './plan
 
 export async function validatePlan(month: string, lines: AllocationLine[]): Promise<ActionResult> {
   const res = await validatePlanWith(getRepo(), month, lines);
-  if (res.ok) revalidateTag('notion');
+  if (res.ok) revalidateNotion('movements', 'plan');
   return res;
 }
 
@@ -17,6 +17,6 @@ export async function declarePurchase(
   assetId: string, month: string, amount: number, date: string, quantity?: number,
 ): Promise<ActionResult> {
   const res = await declarePurchaseWith(getRepo(), assetId, month, amount, date, quantity);
-  if (res.ok) revalidateTag('notion');
+  if (res.ok) revalidateNotion('movements', 'plan');
   return res;
 }

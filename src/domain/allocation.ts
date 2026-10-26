@@ -1,6 +1,6 @@
-import { formatMoney } from './money';
-import { AllocationError } from './types';
-import type { AllocationLine, Asset, AssetClass, Strategy } from './types';
+import { formatMoney, toEur } from './money';
+import { AllocationError, PILOTABLE_CLASSES } from './types';
+import type { AllocationLine, Asset, AssetClass, FxRates, Strategy } from './types';
 import { neutralZone, zoneFor } from './zones';
 
 export interface AllocateInput {
@@ -9,6 +9,8 @@ export interface AllocateInput {
   assets: Asset[];
   strategy: Strategy;
   ratio: number | null;
+  /** Taux du jour : les versements fixes sont saisis dans la devise de l'actif, le plan est en euros. */
+  fx: FxRates;
 }
 
 const METALS: AssetClass = 'Métaux précieux';
@@ -48,17 +50,18 @@ function roundToCents(raws: number[], totalCents: number): number[] {
  * va aux classes en retard sur leur cible ; le surplus éventuel suit les cibles.
  */
 export function allocate(input: AllocateInput): AllocationLine[] {
-  const { amount: M, assets, strategy, ratio } = input;
+  const { amount: M, assets, strategy, ratio, fx } = input;
   const months = input.months ?? 1;
   const active = assets.filter((a) => !a.archived);
   const byId = new Map(active.map((a) => [a.id, a]));
 
-  // Étape 1 : versements fixes, plafonnés au montant restant.
+  // Étape 1 : versements fixes (devise de l'actif, convertis en euros), plafonnés au montant restant.
   const fixedLines: AllocationLine[] = [];
   let fixedTotal = 0;
   for (const a of active) {
     if (!a.fixedMonthly || a.fixedMonthly <= 0) continue;
-    const amtCents = Math.min(toCents(a.fixedMonthly * months), Math.max(0, toCents(M) - toCents(fixedTotal)));
+    const fixedEur = toEur(a.fixedMonthly * months, a.currency, fx);
+    const amtCents = Math.min(toCents(fixedEur), Math.max(0, toCents(M) - toCents(fixedTotal)));
     if (amtCents <= 0) continue;
     const amt = amtCents / 100;
     fixedTotal = (toCents(fixedTotal) + amtCents) / 100;
@@ -67,8 +70,9 @@ export function allocate(input: AllocateInput): AllocationLine[] {
   const RCents = Math.max(0, toCents(M) - toCents(fixedTotal));
   const R = RCents / 100;
 
-  // Étape 2 : écarts par classe pilotée.
-  const classes = Object.keys(strategy.targets) as AssetClass[];
+  // Étape 2 : écarts par classe pilotée. Une cible stockée sur une classe non pilotable (Épargne, Immobilier…)
+  // est ignorée, comme l'annonce l'écran Stratégie.
+  const classes = (Object.keys(strategy.targets) as AssetClass[]).filter((c) => PILOTABLE_CLASSES.includes(c));
   const fixedByClass = new Map<AssetClass, number>();
   for (const l of fixedLines) {
     const cls = byId.get(l.assetId)!.assetClass;

@@ -12,13 +12,18 @@ export const ASSET_CLASSES: AssetClass[] = [
   'Comptes courants', 'Startups', 'Métaux précieux', 'Noms de domaine',
 ];
 
+/** Classes que le plan peut piloter par une cible (les autres ne sont pas investissables par le plan). */
+export const PILOTABLE_CLASSES: readonly AssetClass[] = ASSET_CLASSES.filter(
+  (c) => c !== 'Épargne' && c !== 'Comptes courants' && c !== 'Immobilier' && c !== 'Autres',
+);
+
 export interface FxRates { date: string; EUR: 1; MAD: number; USD: number; GBP: number }
 
 export interface Asset {
   id: string; name: string; assetClass: AssetClass; subtype?: string; institution?: string;
   currency: Currency; mode: 'auto' | 'manual'; quoteId?: string;
   manualValue?: number; manualValueDate?: string;         // devise de l'actif, ISO yyyy-mm-dd
-  quantity: number; costBasis: number;                     // rollups ; métaux : grammes fins
+  quantity: number; costBasis: number;                     // issus des mouvements (withPositions), 0 à la lecture ; métaux : grammes fins
   unitPrice?: number; value?: number; valueEur?: number;   // (script)
   fixedMonthly?: number; archived: boolean; syncStatus?: string; lastUpdate?: string;
 }
@@ -33,6 +38,29 @@ export interface Debt {
   id: string; name: string; type?: string; currency: Currency; outstanding: number;
   rate?: number; monthly?: number; endDate?: string; financedAssetId?: string; valueEur?: number;
 }
+
+/** Saisie d'un actif depuis l'app (jamais les champs rollups / formules / « script »). */
+export interface AssetInput {
+  name: string; assetClass: AssetClass; subtype?: string; institution?: string;
+  currency: Currency; mode: 'auto' | 'manual'; quoteId?: string;
+  manualValue?: number; manualValueDate?: string;      // yyyy-mm-dd
+  fixedMonthly?: number; archived?: boolean;
+}
+
+/**
+ * Modification d'un actif : `null` efface un champ optionnel. `unitPrice: null` vide « Cours unitaire » (écrit par la
+ * synchro, jamais saisi) quand la classe, la cotation ou le mode change : l'ancien cours serait lu dans une autre unité.
+ */
+export type AssetUpdate = { [K in keyof AssetInput]?: AssetInput[K] | null } & { unitPrice?: null };
+
+/** Saisie d'un crédit depuis l'app (la valeur € est calculée ailleurs). */
+export interface DebtInput {
+  name: string; type?: string; currency: Currency; outstanding: number;
+  rate?: number; monthly?: number; endDate?: string; financedAssetId?: string;
+}
+
+/** Écriture d'une ligne clé/valeur de la base Stratégie. */
+export interface StrategyEntryInput { key: string; value?: number | null; text?: string | null; assetId?: string | null }
 
 export interface BudgetLine {
   id: string; name: string; section: 'revenu' | 'depense'; category: string;

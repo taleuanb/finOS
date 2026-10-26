@@ -11,7 +11,7 @@ import { AllocationError } from '@/domain/types';
 import type {
   Asset, AssetClass, BudgetLine, Debt, FxRates, Movement, PlanLine, Snapshot, Strategy,
 } from '@/domain/types';
-import { gain, valueAsset } from '@/domain/valuation';
+import { gain, knownUnitPrice, valueAsset } from '@/domain/valuation';
 import { gridIssue, zoneFor } from '@/domain/zones';
 import type {
   Dashboard, MetalPosition, MetalPurchaseView, Period, PlanLineView, ValuedAsset,
@@ -67,7 +67,8 @@ function isStale(a: Asset, nowMs: number): boolean {
 
 /**
  * Valeurs à afficher : actif Épargne = solde estimé (`savingsEur`), actif manuel = valeur manuelle du jour
- * (jamais la dernière valeur synchronisée, qui vaut 0 avant la première synchro), actif auto = valeur synchronisée.
+ * (jamais la dernière valeur synchronisée, qui vaut 0 avant la première synchro), actif auto = quantité des mouvements ×
+ * dernier cours synchronisé (valeur synchronisée seulement tant qu'aucun cours n'est connu).
  */
 function valueAssets(
   assets: Asset[], fx: FxRates, nowMs: number, savings: { id: string; valueEur: number } | null,
@@ -78,7 +79,9 @@ function valueAssets(
     if (savings && a.id === savings.id) {
       valueEur = savings.valueEur;
       value = fromEur(valueEur, a.currency, fx);
-    } else if (a.mode === 'manual') {
+    } else if (a.mode === 'manual' || knownUnitPrice(a) !== undefined) {
+      // Auto avec un cours connu : quantité des mouvements × dernier cours, comme la synchro (un mouvement
+      // ajouté depuis la dernière synchro compte aussitôt).
       ({ value, valueEur } = valueAsset(a, undefined, fx));
     } else {
       value = a.value ?? 0;
@@ -141,7 +144,8 @@ export function buildDashboard(i: DashboardInput): Dashboard {
   const nameOf = new Map(i.assets.map((a) => [a.id, a.name]));
 
   // --- Totaux, répartition, historique ---
-  const debts = i.debts.map((d) => ({ ...d, valueEur: d.valueEur ?? toEur(d.outstanding, d.currency, fx) }));
+  // Toujours depuis le capital restant dû (comme la synchro) : une « Valeur € » stockée serait périmée après une modification.
+  const debts = i.debts.map((d) => ({ ...d, valueEur: toEur(d.outstanding, d.currency, fx) }));
   const grossEur = sum(assets.map((a) => a.valueEur));
   const debtsEur = sum(debts.map((d) => d.valueEur));
   const netEur = grossEur - debtsEur;
@@ -228,7 +232,7 @@ export function buildDashboard(i: DashboardInput): Dashboard {
   let allocationError: string | null = null;
   if (!validated) {
     try {
-      proposal = allocate({ amount: budget.investEur, assets, strategy, ratio });
+      proposal = allocate({ amount: budget.investEur, assets, strategy, ratio, fx });
     } catch (e) {
       if (!(e instanceof AllocationError)) throw e;
       allocationError = e.message;

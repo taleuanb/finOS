@@ -235,16 +235,20 @@ describe('EpargneView — erreur d’allocation', () => {
     expect(screen.queryByRole('button', { name: 'Valider le plan' })).not.toBeInTheDocument();
   });
 
-  it('propose le lien vers la Stratégie dans Notion quand l’URL est définie', () => {
-    vi.stubEnv('NEXT_PUBLIC_NOTION_STRATEGY_URL', 'https://notion.so/strategie');
+  it("propose le lien « Régler la stratégie » dans le bandeau d'erreur", () => {
     renderView(failing());
-    expect(screen.getByRole('link', { name: 'Ouvrir la Stratégie dans Notion' })).toHaveAttribute('href', 'https://notion.so/strategie');
+    const link = within(screen.getByRole('alert')).getByRole('link', { name: 'Régler la stratégie' });
+    expect(link).toHaveAttribute('href', '/strategie');
+    expect(screen.getAllByRole('link', { name: 'Régler la stratégie' })).toHaveLength(1);
   });
+});
 
-  it("n'affiche pas le lien quand l'URL n'est pas définie", () => {
-    vi.stubEnv('NEXT_PUBLIC_NOTION_STRATEGY_URL', '');
-    renderView(failing());
-    expect(screen.queryByRole('link', { name: /Stratégie dans Notion/ })).not.toBeInTheDocument();
+describe('EpargneView — accès à la Stratégie', () => {
+  it("affiche le lien « Régler la stratégie » vers /strategie, une seule fois, sans lien Notion", () => {
+    renderView(fixtureDashboard);
+    expect(screen.getByRole('link', { name: 'Régler la stratégie' })).toHaveAttribute('href', '/strategie');
+    expect(screen.getAllByRole('link', { name: 'Régler la stratégie' })).toHaveLength(1);
+    expect(screen.queryByRole('link', { name: /Notion/ })).not.toBeInTheDocument();
   });
 });
 
@@ -476,7 +480,7 @@ describe('EpargneView — proposition : cas limites', () => {
 describe('EpargneView — proposition non modifiée avec des centimes (I1)', () => {
   it.each([769.75, 900])('M = %s € : la proposition brute de allocate() est validable telle quelle', (m) => {
     const assets = fixtureDashboard.assets.map((a) => (a.id === 'per' && m === 900 ? { ...a, fixedMonthly: 100.5 } : a));
-    const lines = allocate({ amount: m, assets, strategy: fixtureDashboard.strategy, ratio: fixtureDashboard.metals.ratio });
+    const lines = allocate({ amount: m, assets, strategy: fixtureDashboard.strategy, ratio: fixtureDashboard.metals.ratio, fx: fixtureDashboard.fx });
     renderView({
       ...unvalidated({ proposal: lines }), assets,
       budget: { ...fixtureDashboard.budget, investEur: m },

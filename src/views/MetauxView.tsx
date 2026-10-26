@@ -245,9 +245,12 @@ export function MetauxView({ data }: { data: Dashboard }) {
       <StaleBanner data={data} />
 
       {metals.gridWarning ? (
-        <p role="alert" className="rounded-2xl bg-loss-bg px-4 py-3 text-[13px] font-semibold text-loss">
-          {metals.gridWarning}
-        </p>
+        <div role="alert" className="flex flex-col gap-1 rounded-2xl bg-loss-bg px-4 py-3 text-[13px] font-semibold text-loss">
+          <p>{metals.gridWarning}</p>
+          <Link href="/strategie" className="inline-flex min-h-11 items-center self-start underline">
+            Corriger la grille dans Stratégie
+          </Link>
+        </div>
       ) : null}
 
       {metals.alert ? (

@@ -252,6 +252,27 @@ describe('runSync', () => {
     expect(a.get('etf-revolut')!.value).toBe(30 * 170);
   });
 
+  it('cours indisponible après un nouvel achat : quantité des mouvements × dernier cours, comme le tableau de bord', async () => {
+    const seed = structuredClone(fixtureSeed);
+    seed.movements.push({ id: 'mv-hsbc-new', label: 'Achat', date: '2026-10-26', assetId: 'hsbc', kind: 'buy', quantity: 10, amount: 400 });
+    const repo = new FakeRepo(seed);
+    await runSync(setup({ repo, yahoo: fakeYahoo({ quotes: { LU0806931092: new Error('cours absent') } }) }).deps);
+
+    const a = await byId(repo);
+    expect(a.get('hsbc')!.syncStatus).toMatch(/^⚠ /);
+    expect(a.get('hsbc')!.unitPrice).toBe(36.9); // dernier cours connu conservé
+    expect(a.get('hsbc')!.value).toBeCloseTo(610 * 36.9, 6);
+    const snap = (await repo.listSnapshots()).find((x) => x.date === TODAY)!;
+    expect(snap.byClass['Fonds & ETF']).toBeCloseTo(610 * 36.9 + 17_000, 6);
+
+    const [assets, movements, debts, budget, strategy, plan, snapshots] = await Promise.all([
+      repo.listAssets(), repo.listMovements(), repo.listDebts(), repo.listBudget(), repo.getStrategy(), repo.listPlan(), repo.listSnapshots(),
+    ]);
+    const d = buildDashboard({ assets, movements, debts, budget, strategy, plan, snapshots, series: null, now: NOW });
+    expect(d.totals.grossEur).toBeCloseTo(snap.totalAssetsEur, 6);
+    expect(d.totals.debtsEur).toBeCloseTo(snap.totalDebtsEur, 6);
+  });
+
   it('I3 : le solde Épargne de la synchro et celui du tableau de bord sont identiques', async () => {
     const { repo, deps } = setup();
     await runSync(deps);

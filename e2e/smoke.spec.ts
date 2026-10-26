@@ -6,6 +6,7 @@ const SCREENS = [
   { path: '/budget', name: 'Budget' },
   { path: '/epargne', name: 'Épargne' },
   { path: '/metaux', name: 'Métaux' },
+  { path: '/strategie', name: 'Stratégie' },
 ];
 
 test('sans session, « / » redirige vers /login', async ({ page }) => {

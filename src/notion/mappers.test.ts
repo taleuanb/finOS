@@ -8,7 +8,7 @@ import strategyRows from './__fixtures__/strategy-rows.json';
 import planLine from './__fixtures__/plan-line.json';
 import snapshot from './__fixtures__/snapshot.json';
 import {
-  assetToProperties, budgetLineToProperties, debtToProperties, movementToProperties, pageToAsset,
+  assetInputToProperties, assetToProperties, budgetLineToProperties, debtInputToProperties, strategyEntryToProperties, debtToProperties, movementToProperties, pageToAsset,
   pageToBudgetLine, pageToDebt, pageToMovement, pageToPlanLine, pageToSnapshot, planLineToProperties,
   rowsToStrategy, snapshotToProperties, strategyToRows, valuationToProperties, type NotionPage,
 } from './mappers';
@@ -213,5 +213,96 @@ describe('inverses *ToProperties', () => {
       },
     })));
     expect(back).toEqual(s);
+  });
+});
+
+describe('assetInputToProperties', () => {
+  const full = {
+    name: 'Livret', assetClass: 'Épargne' as const, subtype: 'Livret A', institution: 'LCL', currency: 'MAD' as const,
+    mode: 'manual' as const, quoteId: 'XAU', manualValue: 1200, manualValueDate: '2026-10-25', fixedMonthly: 50, archived: true,
+  };
+  it("n'inclut jamais Quantité, Prix de revient, Plus-value, % ni les champs script", () => {
+    const props = assetInputToProperties(full);
+    for (const k of ['Quantité', 'Prix de revient', 'Plus-value', '%', 'Cours unitaire', 'Valeur', 'Valeur €', 'Statut sync', 'Dernière MAJ', 'Mouvements']) {
+      expect(props).not.toHaveProperty(k);
+    }
+  });
+  it('unitPrice null vide « Cours unitaire » (jamais une valeur écrite depuis la saisie)', () => {
+    expect(assetInputToProperties({ unitPrice: null })).toEqual({ 'Cours unitaire': { number: null } });
+    expect(assetInputToProperties({ name: 'X' })).not.toHaveProperty('Cours unitaire');
+  });
+  it('écrit chaque champ dans le type que lisent les mappers de lecture (aller-retour)', () => {
+    const props = assetInputToProperties(full);
+    expect(props['Sous-type']).toEqual({ rich_text: [{ text: { content: 'Livret A' } }] });
+    expect(props['Établissement']).toEqual({ select: { name: 'LCL' } });
+    expect(props['Valorisation']).toEqual({ select: { name: 'Manuelle' } });
+    expect(props['Date valeur manuelle']).toEqual({ date: { start: '2026-10-25' } });
+    expect(props['Archivé']).toEqual({ checkbox: true });
+    const back = pageToAsset({ id: 'x', properties: asProps(props) });
+    expect(back).toMatchObject({
+      name: 'Livret', assetClass: 'Épargne', subtype: 'Livret A', institution: 'LCL', currency: 'MAD', mode: 'manual',
+      quoteId: 'XAU', manualValue: 1200, manualValueDate: '2026-10-25', fixedMonthly: 50, archived: true,
+    });
+  });
+  it("n'écrit que les clés présentes ; undefined = inchangé", () => {
+    expect(Object.keys(assetInputToProperties({ manualValue: 5, subtype: undefined }))).toEqual(['Valeur manuelle']);
+  });
+  it('null vide la propriété optionnelle', () => {
+    const props = assetInputToProperties({ subtype: null, institution: null, quoteId: null, manualValue: null, manualValueDate: null, fixedMonthly: null, archived: null });
+    expect(props).toEqual({
+      'Sous-type': { rich_text: [] },
+      'Établissement': { select: null },
+      'Identifiant cotation': { rich_text: [] },
+      'Valeur manuelle': { number: null },
+      'Date valeur manuelle': { date: null },
+      'Versement fixe mensuel': { number: null },
+      'Archivé': { checkbox: false },
+    });
+  });
+  it('null sur un champ obligatoire est ignoré (jamais de titre ou devise vidés)', () => {
+    expect(assetInputToProperties({ name: null, assetClass: null, currency: null, mode: null })).toEqual({});
+  });
+});
+
+describe('debtInputToProperties', () => {
+  it('écrit les propriétés de Dettes sans Valeur €, avec la relation Actif financé', () => {
+    const props = debtInputToProperties({
+      name: 'Crédit', type: 'Crédit immobilier', currency: 'MAD', outstanding: 600000, rate: 3.2, monthly: 4000,
+      endDate: '2040-01-31', financedAssetId: 'dar-sakan',
+    });
+    expect(props).not.toHaveProperty('Valeur €');
+    expect(props['Nom']).toEqual({ title: [{ text: { content: 'Crédit' } }] });
+    expect(props['Type']).toEqual({ select: { name: 'Crédit immobilier' } });
+    expect(props['Actif financé']).toEqual({ relation: [{ id: 'dar-sakan' }] });
+    expect(props['Date de fin']).toEqual({ date: { start: '2040-01-31' } });
+    const back = pageToDebt({ id: 'd', properties: asProps(props) });
+    expect(back).toEqual({
+      id: 'd', name: 'Crédit', type: 'Crédit immobilier', currency: 'MAD', outstanding: 600000, rate: 3.2, monthly: 4000,
+      endDate: '2040-01-31', financedAssetId: 'dar-sakan',
+    });
+  });
+  it('null efface (relation vide, date vide) ; absent = inchangé', () => {
+    expect(debtInputToProperties({ financedAssetId: null, endDate: null, rate: null, monthly: null, type: null })).toEqual({
+      'Actif financé': { relation: [] }, 'Date de fin': { date: null }, 'Taux': { number: null },
+      'Mensualité': { number: null }, 'Type': { select: null },
+    });
+    expect(debtInputToProperties({ outstanding: 10 })).toEqual({ 'Capital restant dû': { number: 10 } });
+  });
+});
+
+describe('strategyEntryToProperties', () => {
+  it('création : titre + seulement les champs fournis', () => {
+    expect(strategyEntryToProperties({ key: 'cible:Crypto', value: 10 }, true)).toEqual({
+      'Clé': { title: [{ text: { content: 'cible:Crypto' } }] }, 'Valeur': { number: 10 },
+    });
+  });
+  it('mise à jour : ne réécrit pas le titre ; null efface', () => {
+    expect(strategyEntryToProperties({ key: 'k', value: null, text: null, assetId: null }, false)).toEqual({
+      'Valeur': { number: null }, 'Texte': { rich_text: [] }, 'Actif': { relation: [] },
+    });
+    expect(strategyEntryToProperties({ key: 'k', text: 'EUR', assetId: 'a1' }, false)).toEqual({
+      'Texte': { rich_text: [{ text: { content: 'EUR' } }] }, 'Actif': { relation: [{ id: 'a1' }] },
+    });
+    expect(strategyEntryToProperties({ key: 'k' }, false)).toEqual({});
   });
 });

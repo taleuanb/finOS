@@ -27,6 +27,10 @@ function withValue(a: Asset, value: number): Asset {
   return { ...a, value, valueEur: toEurValue(value, a.currency) };
 }
 
+/** Grammes fins des mouvements de métaux ci-dessous (or : 2 × 6,4516 g + collier 0 g ; argent : 3 × 93,309 g + 500 g). */
+const GOLD_GRAMS = 12.9032;
+const SILVER_GRAMS = 779.927;
+
 const assets: Asset[] = [
   // Immobilier (MAD)
   withValue(manual({ id: 'dar-sakan', name: 'Dar Sakan', assetClass: 'Immobilier', subtype: 'Résidence secondaire · Maroc', currency: 'MAD', manualValue: 1_200_000, costBasis: cost(1_200_000, 0.083) }), 1_200_000),
@@ -62,16 +66,17 @@ const assets: Asset[] = [
   withValue(manual({ id: 'syla', name: 'Syla Invest', assetClass: 'Startups', currency: 'EUR', manualValue: 2_000, costBasis: 2_000 }), 2_000),
   withValue(manual({ id: 'kunto', name: 'kunto', assetClass: 'Startups', currency: 'EUR', manualValue: 1_500, costBasis: 1_500 }), 1_500),
   withValue(manual({ id: 'fullsoon', name: 'Fullsoon', assetClass: 'Startups', currency: 'EUR', manualValue: 1_500, costBasis: 1_500 }), 1_500),
-  // Métaux précieux (quantité en grammes fins ; valeurs arrondies comme sur la maquette).
-  // Le seed reprend les KPI du tableur de l'utilisateur, connus pour être incohérents avec les lignes d'achat (à corriger par l'utilisateur avant l'import).
+  // Métaux précieux (quantité en grammes fins). Valeur = grammes des mouvements × cours €/kg ÷ 1000, comme le
+  // calculent la synchro et le tableau de bord. Les prix de revient reprennent les KPI du tableur de l'utilisateur,
+  // connus pour être incohérents avec les lignes d'achat (à corriger par l'utilisateur avant l'import).
   withValue({
     id: 'or', name: 'Or physique', assetClass: 'Métaux précieux', institution: 'Physique', currency: 'EUR', mode: 'auto', quoteId: 'XAU',
-    quantity: 24.9, costBasis: 2_402, unitPrice: 125_926, archived: false, syncStatus: 'ok', lastUpdate: TODAY,
-  }, 3_136),
+    quantity: GOLD_GRAMS, costBasis: 2_402, unitPrice: 125_926, archived: false, syncStatus: 'ok', lastUpdate: TODAY,
+  }, (GOLD_GRAMS * 125_926) / 1000),
   withValue({
     id: 'ag', name: 'Argent physique', assetClass: 'Métaux précieux', institution: 'Physique', currency: 'EUR', mode: 'auto', quoteId: 'XAG',
-    quantity: 593.3, costBasis: 948, unitPrice: 1_952, archived: false, syncStatus: 'ok', lastUpdate: TODAY,
-  }, 1_158),
+    quantity: SILVER_GRAMS, costBasis: 948, unitPrice: 1_952, archived: false, syncStatus: 'ok', lastUpdate: TODAY,
+  }, (SILVER_GRAMS * 1_952) / 1000),
   // Noms de domaine
   withValue(manual({ id: 'domaines', name: 'Portefeuille domaines', assetClass: 'Noms de domaine', currency: 'EUR', manualValue: 1_606, costBasis: cost(1_606, 0.338) }), 1_606),
 ];
@@ -147,7 +152,7 @@ function finalByClass(): Record<AssetClass, number> {
   return out;
 }
 
-/** Instantanés mensuels du 2025-11-01 au 2026-10-25, net croissant jusqu'à ≈ 423 147 €. */
+/** Instantanés mensuels du 2025-11-01 au 2026-10-25, net croissant jusqu'à ≈ 422 000 €. */
 function buildSnapshots(): Snapshot[] {
   const end = finalByClass();
   const endAssets = Object.values(end).reduce((s, v) => s + v, 0);

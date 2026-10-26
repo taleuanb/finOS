@@ -1,5 +1,5 @@
 // Dashboard des maquettes V2, construit à la main à partir de fixtureSeed (pas de fonctions du domaine).
-// Cohérent avec le seed : net ≈ 423 147 €, brut ≈ 478 447 €, dettes ≈ 55 300 €, épargne du mois 1 769,75 €.
+// Cohérent avec le seed : net ≈ 422 000 €, brut ≈ 477 300 €, dettes ≈ 55 300 €, épargne du mois 1 769,75 €.
 import type { AssetClass, FxRates } from '@/domain/types';
 import { fixtureSeed, FIXTURE_FX } from '@/notion/seed';
 import type { Dashboard, MetalPosition, MetalPurchaseView, Period, PlanLineView, ValuedAsset } from './dashboard';

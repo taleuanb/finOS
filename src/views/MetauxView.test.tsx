@@ -31,6 +31,7 @@ describe('MetauxView', () => {
   it('I10 : avertit quand la grille or/argent de la Stratégie est incomplète', () => {
     view(withMetals({ gridWarning: '⚠ Grille or/argent incomplète dans la Stratégie (zone illisible : Bizarre)' }));
     expect(screen.getByRole('alert')).toHaveTextContent('⚠ Grille or/argent incomplète dans la Stratégie');
+    expect(within(screen.getByRole('alert')).getByRole('link', { name: 'Corriger la grille dans Stratégie' })).toHaveAttribute('href', '/strategie');
   });
 
   it('sans avertissement de grille : pas d’alerte', () => {

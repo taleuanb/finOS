@@ -22,7 +22,7 @@ export function positionFromMovements(movements: Movement[], assetId: string): {
   return found ? { quantity: clean(quantity), costBasis: clean(costBasis) } : null;
 }
 
-/** Actifs dont quantité et prix de revient viennent des mouvements ; un actif sans mouvement garde les siens. */
+/** Actifs dont quantité et prix de revient viennent des mouvements ; un actif sans mouvement garde ce que porte la lecture (0 : les colonnes Quantité / Prix de revient de Notion ne sont plus lues). */
 export function withPositions(assets: Asset[], movements: Movement[]): Asset[] {
   return assets.map((a) => {
     const p = positionFromMovements(movements, a.id);

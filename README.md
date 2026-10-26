@@ -36,7 +36,7 @@ npm run dev                  # avec Notion : NOTION_TOKEN et NOTION_DB_* requis
    Le script crée la page « Patrimoine » sous WEALTH, avec les bases Actifs, Mouvements, Dettes, Budget, Stratégie, Plan mensuel et Historique. Chaque identifiant `NOTION_DB_*` est affiché dès que sa base est créée ; en cas d'échec, le script rappelle les bases déjà créées (à supprimer avec la page « Patrimoine » avant de relancer).
 4. Coller dans `.env.local` les lignes `NOTION_DB_*` affichées par le script. Ce sont des identifiants de **sources de données** (data sources), pas d'anciennes bases.
 5. **Restreindre l'accès** : partager la seule page « Patrimoine » avec l'intégration (menu `…` → `Connexions`), puis retirer l'intégration de la page WEALTH. L'intégration n'a ainsi accès qu'à « Patrimoine » et à ses bases.
-6. **Compléter la base Stratégie** (une ligne par réglage, colonne `Clé`). Le script crée les lignes avec leurs valeurs par défaut ; il reste à choisir les actifs dans la colonne relation `Actif` :
+6. **Compléter la base Stratégie** (une ligne par réglage, colonne `Clé`). Le script crée les lignes avec leurs valeurs par défaut ; il reste à choisir les actifs. Tout se règle aussi **dans l'app, page Stratégie** (lien « Régler la stratégie » de l'écran Épargne : investissement mensuel, cibles et actif principal par classe, actifs or/argent/épargne, grille or/argent) ; les écritures sont validées côté serveur. Dans Notion, les actifs se choisissent dans la colonne relation `Actif` :
 
    | Clé | Colonne utilisée | Rôle |
    | --- | --- | --- |
@@ -79,8 +79,8 @@ npx tsx --env-file=.env.local scripts/import-metals.ts autre.csv  # ou un autre 
    | `APP_PASSWORD` | Mot de passe unique de l'app |
    | `SESSION_SECRET` | Secret de signature du cookie de session (32 caractères minimum) |
    | `CRON_SECRET` | Secret accepté par `/api/sync` pour le cron |
-   | `NEXT_PUBLIC_NOTION_ASSETS_URL` (facultatif) | Lien vers la base Actifs dans Notion |
-   | `NEXT_PUBLIC_NOTION_STRATEGY_URL` (facultatif) | Lien vers la base Stratégie dans Notion |
+
+   Les actifs et les crédits se créent et se modifient directement dans l'écran **Patrimoine** (bouton **Ajouter**, toucher d'une ligne pour la modifier) ; les mouvements (achats, ventes) y sont ajoutés depuis la fiche d'un actif (**Ajouter un mouvement**). Plus besoin de passer par Notion, ni de lien vers la base Actifs ; seule la correction d'un mouvement déjà enregistré se fait encore dans Notion.
 
 3. Déployer. Le fichier `vercel.json` programme un cron qui appelle `/api/sync` **tous les jours à 05:00 UTC**. Quand `CRON_SECRET` est défini, Vercel l'envoie automatiquement dans l'en-tête `Authorization: Bearer <CRON_SECRET>`, que le middleware accepte pour cette seule route.
 4. Sur le plan **Hobby**, un cron ne peut s'exécuter qu'**une fois par jour**.
@@ -94,6 +94,10 @@ curl -X POST https://<votre-app>.vercel.app/api/sync -H "Authorization: Bearer $
 ```
 
 En cas d'échec partiel d'une source, les autres actifs sont mis à jour et l'instantané est écrit avec `partial: true` ; le rapport liste les erreurs.
+
+## Performance
+
+Chaque base Notion (actifs, mouvements, dettes, budget, stratégie, plan, historique) a son propre cache de 15 minutes, invalidé par sa clé : une écriture dans l'app ne vide que la base qu'elle touche. La synchro quotidienne invalide actifs, mouvements et historique puis **préchauffe** le tableau de bord, si bien que la première visite de la journée trouve des caches pleins. Les lectures ne demandent à Notion que les colonnes utiles (les colonnes calculées par Notion sont ignorées : quantités et prix de revient viennent des mouvements) et l'historique est borné aux 800 derniers jours. Pour mesurer : chaque lecture réelle de Notion écrit une ligne `[perf] assets 312ms` (durées seulement, jamais de montant) dans les logs Vercel (*Logs* du projet, filtre `[perf]`), et `/api/sync` renvoie un en-tête `Server-Timing`.
 
 ## Tests
 
